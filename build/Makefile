@@ -41,4 +41,4 @@ run: $(BIN)
 	LD_LIBRARY_PATH=$(VULKAN_SDK_PATH)/lib VK_LAYER_PATH=$(VULKAN_SDK_PATH)/etc/vulkan/explicit_layer.d ./$(BIN)
 
 clean:
-	rm -rf $(BIN) $(OBJ)
+	rm -rf $(OBJ)

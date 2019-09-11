@@ -1,4 +1,8 @@
+#include <cstdio>
 #include <vector>
+
+#define GLFW_INCLUDE_VULKAN
+#include <GLFW/glfw3.h>
 #include <vulkan/vulkan.hpp>
 
 std::vector<const char *> instanceExtensions = {
@@ -17,8 +21,52 @@ std::vector<const char *> validationLayers = {
 bool validationEnabled = true;
 
 /* global variables (to be put as class members) */
+GLFWwindow *window;
 VkInstance instance;
+VkSurfaceKHR surface;
 VkPhysicalDevice physicalDevice;
+VkDevice logicalDevice;
+VkQueue graphicsQueue;
+
+uint32_t graphicsFamilyIndex, presentFamilyIndex, transferFamilyIndex;
+
+void keyboard(GLFWwindow *window, int k, int scancode, int action, int mods) {
+	switch (k) {
+	case GLFW_KEY_ESCAPE:
+		if (action == GLFW_PRESS)
+			glfwSetWindowShouldClose(window, GLFW_TRUE);
+		break;
+	}
+}
+
+GLFWwindow *createWindow(int width, int height, const char *title) {
+
+	GLFWwindow *window;
+
+	glfwInit();
+	glfwWindowHint(GLFW_CLIENT_API, GLFW_NO_API);
+	glfwWindowHint(GLFW_RESIZABLE, GLFW_TRUE);
+
+	window = glfwCreateWindow(width, height, title, nullptr, nullptr);
+
+	glfwSetKeyCallback(window, keyboard);
+
+	return window;
+}
+
+// TODO : nicer way of switching between nullws/glfw
+void initInstanceExtensions(bool useGLFW) {
+
+	if (useGLFW) {
+		instanceExtensions.clear();
+
+		uint32_t glfwExtensionCount;
+		const char **glfwExtensions = glfwGetRequiredInstanceExtensions(&glfwExtensionCount);
+
+		for (uint32_t i = 0; i < glfwExtensionCount; i++)
+			instanceExtensions.push_back(glfwExtensions[i]);
+	}
+}
 
 VkInstance createInstance(const char *name) {
 
@@ -46,6 +94,20 @@ VkInstance createInstance(const char *name) {
 	}
 
 	return instance;
+}
+
+VkSurfaceKHR createSurface() {
+
+	VkSurfaceKHR surface;
+
+	// TODO : make work with nullws (i.e. no glfw)
+	if (glfwCreateWindowSurface(instance, window, nullptr, &surface) != VK_SUCCESS) {
+		fputs("Unable to create GLFW surface\n", stderr);
+		exit(EXIT_FAILURE);
+	}
+
+	return surface;
+		
 }
 
 std::vector<VkPhysicalDevice> queryPhysicalDevices() {
@@ -88,7 +150,7 @@ void printGPUInfo(VkPhysicalDevice device) {
 /**
  * prints supported instance layers
  */
-void printInstanceLayerInfo() {
+void printSupportedInstanceLayers() {
 
 	uint32_t instanceLayerCount;
 	vkEnumerateInstanceLayerProperties(&instanceLayerCount, nullptr);
@@ -109,7 +171,7 @@ void printInstanceLayerInfo() {
 /**
  * prints supported instance extensions
  */
-void printInstanceExtensionInfo() {
+void printSupportedInstanceExtensions() {
 
 	uint32_t instanceExtensionCount;
 	vkEnumerateInstanceExtensionProperties(nullptr, &instanceExtensionCount, nullptr);
@@ -130,7 +192,7 @@ void printInstanceExtensionInfo() {
 /**
  * prints supported device layers
  */
-void printDeviceLayerInfo(VkPhysicalDevice device) {
+void printSupportedDeviceLayers(VkPhysicalDevice device) {
 
 	uint32_t deviceLayerCount;
 	vkEnumerateDeviceLayerProperties(device, &deviceLayerCount, nullptr);
@@ -151,7 +213,7 @@ void printDeviceLayerInfo(VkPhysicalDevice device) {
 /**
  * prints supported device extensions
  */
-void printDeviceExtensionInfo() {
+void printSupportedDeviceExtensions() {
 
 	uint32_t deviceExtensionCount;
 	vkEnumerateInstanceExtensionProperties(nullptr, &deviceExtensionCount, nullptr);
@@ -169,6 +231,18 @@ void printDeviceExtensionInfo() {
 
 }
 
+void printEnabledInstanceExtensions() {
+	for (const char *extension : instanceExtensions) {
+		fprintf(stdout, "%s\n", extension);
+	}
+}
+
+void printEnabledDeviceExtensions() {
+	for (const char *extension : deviceExtensions) {
+		fprintf(stdout, "%s\n", extension);
+	}
+}
+
 /**
  * returns list of supported device features
  */
@@ -179,9 +253,10 @@ VkPhysicalDeviceFeatures querySupportedFeatures() {
 	return supportedFeatures;
 }
 
-uint32_t graphicsFamilyIndex, presentFamilyIndex, transferFamilyIndex;
-
-void queryQueueFamilies(VkPhysicalDevice device) {
+/**
+ * get the index of a queue family supporting the appropriate flags
+ */
+int getQueueFamilyIndex(VkPhysicalDevice device, VkQueueFlagBits queueBits) {
 
 	uint32_t queueFamilyCount;
 	vkGetPhysicalDeviceQueueFamilyProperties(device, &queueFamilyCount, nullptr);
@@ -190,19 +265,56 @@ void queryQueueFamilies(VkPhysicalDevice device) {
 	vkGetPhysicalDeviceQueueFamilyProperties(device, &queueFamilyCount, queueFamilies.data());
 
 	for (uint32_t i = 0; i < queueFamilyCount; i++) {
-		// TODO
+
+		// TODO : if we want queues with priorities, need >= 2 queues
+		if (queueFamilies[i].queueFlags & queueBits)
+			return i;
+
 	}
 
+	return -1;
+}
+
+/**
+ * get the index of a queue family capable of presenting swapchain images
+ */
+int getPresentationCapableQueueIndex(VkPhysicalDevice device, VkSurfaceKHR surface) {
+
+	uint32_t queueFamilyCount;
+	vkGetPhysicalDeviceQueueFamilyProperties(device, &queueFamilyCount, nullptr);
+
+	std::vector<VkQueueFamilyProperties> queueFamilies(queueFamilyCount);
+	vkGetPhysicalDeviceQueueFamilyProperties(device, &queueFamilyCount, queueFamilies.data());
+
+	for (uint32_t i = 0; i < queueFamilyCount; i++) {
+
+		VkBool32 presentationSupport = VK_FALSE;
+		vkGetPhysicalDeviceSurfaceSupportKHR(device, i, surface, &presentationSupport);
+
+		if (presentationSupport == VK_TRUE)
+			return i;
+
+	}
+
+	return -1;
 }
 
 VkDevice createLogicalDevice() {
 
+	// get graphics queue family index
+	graphicsFamilyIndex = getQueueFamilyIndex(physicalDevice, VK_QUEUE_GRAPHICS_BIT);
+
+	// get a queue family
+	presentFamilyIndex = getPresentationCapableQueueIndex(physicalDevice, surface);
+
+	float queuePriorities[] = { 0.0f };
+
 	// initialise queues
 	VkDeviceQueueCreateInfo deviceQueueCI = {};
 	deviceQueueCI.sType            = VK_STRUCTURE_TYPE_DEVICE_QUEUE_CREATE_INFO;
-	deviceQueueCI.queueFamilyIndex = 0;
+	deviceQueueCI.queueFamilyIndex = graphicsFamilyIndex;
 	deviceQueueCI.queueCount       = 1;
-	deviceQueueCI.pQueuePriorities = nullptr;	// default priorities
+	deviceQueueCI.pQueuePriorities = queuePriorities;	// default priorities
 
 	// turn on the appropriate (supported) device features
 	VkPhysicalDeviceFeatures supportedFeatures = querySupportedFeatures();
@@ -227,6 +339,8 @@ VkDevice createLogicalDevice() {
 		exit(EXIT_FAILURE);
 	}
 
+	vkGetDeviceQueue(logicalDevice, graphicsFamilyIndex, 0, &graphicsQueue);
+
 	return logicalDevice;
 }
 
@@ -242,16 +356,32 @@ void cleanup() {
 
 int main(int argc, char *argv[]) {
 
+	window = createWindow(640, 480, "spock");
+
+	initInstanceExtensions(true);
+
 	instance = createInstance("spock");
 
+	surface = createSurface();
+
 	std::vector<VkPhysicalDevice> physicalDevices = queryPhysicalDevices();
-
 	physicalDevice = selectPhysicalDevice(physicalDevices);
-	printGPUInfo(physicalDevice);
 
-	// printInstanceLayerInfo();
-	// printDeviceLayerInfo(physicalDevice);
-	// printInstanceExtensionInfo();
-	// printDeviceExtensionInfo();
+	logicalDevice = createLogicalDevice();
+
+	printEnabledInstanceExtensions();
+
+	while (!glfwWindowShouldClose(window)) {
+		glfwPollEvents();
+
+	}
+
+	// TODO : tidy up
+
+	// printGPUInfo(physicalDevice);
+	// printSupportedInstanceLayers();
+	// printSupportedDeviceLayers(physicalDevice);
+	// printSupportedInstanceExtensions();
+	// printSupportedDeviceExtensions();
 
 }
