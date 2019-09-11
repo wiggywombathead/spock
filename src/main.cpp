@@ -179,6 +179,22 @@ VkPhysicalDeviceFeatures querySupportedFeatures() {
 	return supportedFeatures;
 }
 
+uint32_t graphicsFamilyIndex, presentFamilyIndex, transferFamilyIndex;
+
+void queryQueueFamilies(VkPhysicalDevice device) {
+
+	uint32_t queueFamilyCount;
+	vkGetPhysicalDeviceQueueFamilyProperties(device, &queueFamilyCount, nullptr);
+
+	std::vector<VkQueueFamilyProperties> queueFamilies(queueFamilyCount);
+	vkGetPhysicalDeviceQueueFamilyProperties(device, &queueFamilyCount, queueFamilies.data());
+
+	for (uint32_t i = 0; i < queueFamilyCount; i++) {
+		// TODO
+	}
+
+}
+
 VkDevice createLogicalDevice() {
 
 	// initialise queues
@@ -216,9 +232,9 @@ VkDevice createLogicalDevice() {
 
 void cleanup() {
 
-	vkDeviceWaitIdle(logicalDevice);
+	// vkDeviceWaitIdle(logicalDevice);
 
-	vkDestroyDevice(logicalDevice, nullptr);
+	// vkDestroyDevice(logicalDevice, nullptr);
 
 	vkDestroyInstance(instance, nullptr);
 

@@ -1,2 +1,4 @@
 spock
 obj/
+
+*.swp
