@@ -5,6 +5,12 @@
 #include <GLFW/glfw3.h>
 #include <vulkan/vulkan.hpp>
 
+std::vector<const char *> instanceLayers = {
+#if defined(DEBUG)
+    "VK_LAYER_KHRONOS_validation"
+#endif
+};
+
 std::vector<const char *> instanceExtensions = {
 	VK_KHR_SURFACE_EXTENSION_NAME,
 	VK_KHR_DISPLAY_EXTENSION_NAME
@@ -12,10 +18,6 @@ std::vector<const char *> instanceExtensions = {
 
 std::vector<const char *> deviceExtensions = {
 	VK_KHR_SWAPCHAIN_EXTENSION_NAME
-};
-
-std::vector<const char *> validationLayers = {
-    "VK_LAYER_KHRONOS_validation"
 };
 
 bool validationEnabled = true;
@@ -37,114 +39,6 @@ void keyboard(GLFWwindow *window, int k, int scancode, int action, int mods) {
 			glfwSetWindowShouldClose(window, GLFW_TRUE);
 		break;
 	}
-}
-
-GLFWwindow *createWindow(int width, int height, const char *title) {
-
-	GLFWwindow *window;
-
-	glfwInit();
-	glfwWindowHint(GLFW_CLIENT_API, GLFW_NO_API);
-	glfwWindowHint(GLFW_RESIZABLE, GLFW_TRUE);
-
-	window = glfwCreateWindow(width, height, title, nullptr, nullptr);
-
-	glfwSetKeyCallback(window, keyboard);
-
-	return window;
-}
-
-// TODO : nicer way of switching between nullws/glfw
-void initInstanceExtensions(bool useGLFW) {
-
-	if (useGLFW) {
-		instanceExtensions.clear();
-
-		uint32_t glfwExtensionCount;
-		const char **glfwExtensions = glfwGetRequiredInstanceExtensions(&glfwExtensionCount);
-
-		for (uint32_t i = 0; i < glfwExtensionCount; i++)
-			instanceExtensions.push_back(glfwExtensions[i]);
-	}
-}
-
-VkInstance createInstance(const char *name) {
-
-	VkInstance instance;
-
-	VkApplicationInfo appInfo = {};
-	appInfo.sType                 = VK_STRUCTURE_TYPE_APPLICATION_INFO;
-	appInfo.pApplicationName      = name;
-	appInfo.applicationVersion    = VK_MAKE_VERSION(1, 0, 0);
-	appInfo.pEngineName			  = "spock";
-	appInfo.engineVersion         = VK_MAKE_VERSION(1, 0, 0);
-	appInfo.apiVersion            = VK_API_VERSION_1_0;
-
-	VkInstanceCreateInfo instanceCI = {};
-	instanceCI.sType                   = VK_STRUCTURE_TYPE_INSTANCE_CREATE_INFO;
-	instanceCI.pApplicationInfo        = &appInfo;
-	instanceCI.enabledLayerCount       = static_cast<uint32_t>(validationLayers.size());
-	instanceCI.ppEnabledLayerNames     = validationLayers.data();
-	instanceCI.enabledExtensionCount   = static_cast<uint32_t>(instanceExtensions.size());
-	instanceCI.ppEnabledExtensionNames = instanceExtensions.data();
-
-	if (vkCreateInstance(&instanceCI, nullptr, &instance) != VK_SUCCESS) {
-		fputs("Could not create Vulkan instance", stderr);
-		exit(EXIT_FAILURE);
-	}
-
-	return instance;
-}
-
-VkSurfaceKHR createSurface() {
-
-	VkSurfaceKHR surface;
-
-	// TODO : make work with nullws (i.e. no glfw)
-	if (glfwCreateWindowSurface(instance, window, nullptr, &surface) != VK_SUCCESS) {
-		fputs("Unable to create GLFW surface\n", stderr);
-		exit(EXIT_FAILURE);
-	}
-
-	return surface;
-		
-}
-
-std::vector<VkPhysicalDevice> queryPhysicalDevices() {
-
-	// must discover connected physical devices before creating logical device
-	uint32_t deviceCount;
-	vkEnumeratePhysicalDevices(instance, &deviceCount, nullptr);
-
-	if (deviceCount == 0) {
-		fputs("No Vulkan-compatible GPUs found", stderr);
-		exit(EXIT_FAILURE);
-	}
-
-	std::vector<VkPhysicalDevice> physicalDevices(deviceCount);
-	vkEnumeratePhysicalDevices(instance, &deviceCount, physicalDevices.data());
-
-	return physicalDevices;
-}
-
-// TODO : other way to select physical device?
-VkPhysicalDevice selectPhysicalDevice(std::vector<VkPhysicalDevice> devices) {
-	return devices[0];
-}
-
-void printGPUInfo(VkPhysicalDevice device) {
-
-	VkPhysicalDeviceProperties deviceProperties;
-	vkGetPhysicalDeviceProperties(device, &deviceProperties);
-
-	fprintf(stdout,
-			"%s (supports API version %u.%u.%u)\n",
-			deviceProperties.deviceName,
-			VK_VERSION_MAJOR(deviceProperties.apiVersion),
-			VK_VERSION_MINOR(deviceProperties.apiVersion),
-			VK_VERSION_PATCH(deviceProperties.apiVersion)
-			);
-
 }
 
 /**
@@ -243,6 +137,151 @@ void printEnabledDeviceExtensions() {
 	}
 }
 
+bool requestedInstanceLayersSupported(std::vector<const char *> requestedLayers) {
+
+	uint32_t supportedLayerCount;
+	vkEnumerateInstanceLayerProperties(&supportedLayerCount, nullptr);
+
+	std::vector<VkLayerProperties> supportedLayers(supportedLayerCount);
+	vkEnumerateInstanceLayerProperties(&supportedLayerCount, supportedLayers.data());
+
+	for (uint32_t i = 0; i < requestedLayers.size(); i++) {
+
+		bool layerFound = false;
+		for (VkLayerProperties layer : supportedLayers) {
+			if (strcmp(requestedLayers[i], layer.layerName)) {
+				layerFound = true;
+				break;
+			}
+		}
+
+		if (!layerFound) {
+			fprintf(stderr, "Layer %s not supported\n", requestedLayers[i]);
+			return false;
+		}
+	}
+
+	return true;
+
+}
+
+void initLayers(std::vector<const char *> requestedLayers) {
+
+	if (!requestedInstanceLayersSupported(requestedLayers)) {
+		printSupportedInstanceLayers();
+		exit(EXIT_FAILURE);
+	}
+
+}
+
+// TODO : nicer way of switching between nullws/glfw
+void initInstanceExtensions(bool useGLFW) {
+
+	if (useGLFW) {
+		instanceExtensions.clear();
+
+		uint32_t glfwExtensionCount;
+		const char **glfwExtensions = glfwGetRequiredInstanceExtensions(&glfwExtensionCount);
+
+		for (uint32_t i = 0; i < glfwExtensionCount; i++)
+			instanceExtensions.push_back(glfwExtensions[i]);
+	}
+}
+
+GLFWwindow *createWindow(int width, int height, const char *title) {
+
+	GLFWwindow *window;
+
+	glfwInit();
+	glfwWindowHint(GLFW_CLIENT_API, GLFW_NO_API);
+	glfwWindowHint(GLFW_RESIZABLE, GLFW_TRUE);
+
+	window = glfwCreateWindow(width, height, title, nullptr, nullptr);
+
+	glfwSetKeyCallback(window, keyboard);
+
+	return window;
+}
+
+VkInstance createInstance(const char *name) {
+
+	VkInstance instance;
+
+	VkApplicationInfo appInfo = {};
+	appInfo.sType                 = VK_STRUCTURE_TYPE_APPLICATION_INFO;
+	appInfo.pApplicationName      = name;
+	appInfo.applicationVersion    = VK_MAKE_VERSION(1, 0, 0);
+	appInfo.pEngineName			  = "spock";
+	appInfo.engineVersion         = VK_MAKE_VERSION(1, 0, 0);
+	appInfo.apiVersion            = VK_API_VERSION_1_0;
+
+	VkInstanceCreateInfo instanceCI = {};
+	instanceCI.sType                   = VK_STRUCTURE_TYPE_INSTANCE_CREATE_INFO;
+	instanceCI.pApplicationInfo        = &appInfo;
+	instanceCI.enabledLayerCount       = static_cast<uint32_t>(instanceLayers.size());
+	instanceCI.ppEnabledLayerNames     = instanceLayers.data();
+	instanceCI.enabledExtensionCount   = static_cast<uint32_t>(instanceExtensions.size());
+	instanceCI.ppEnabledExtensionNames = instanceExtensions.data();
+
+	if (vkCreateInstance(&instanceCI, nullptr, &instance) != VK_SUCCESS) {
+		fputs("Could not create Vulkan instance", stderr);
+		exit(EXIT_FAILURE);
+	}
+
+	return instance;
+}
+
+VkSurfaceKHR createSurface() {
+
+	VkSurfaceKHR surface;
+
+	// TODO : make work with nullws (i.e. no glfw)
+	if (glfwCreateWindowSurface(instance, window, nullptr, &surface) != VK_SUCCESS) {
+		fputs("Unable to create GLFW surface\n", stderr);
+		exit(EXIT_FAILURE);
+	}
+
+	return surface;
+		
+}
+
+std::vector<VkPhysicalDevice> queryPhysicalDevices() {
+
+	// must discover connected physical devices before creating logical device
+	uint32_t deviceCount;
+	vkEnumeratePhysicalDevices(instance, &deviceCount, nullptr);
+
+	if (deviceCount == 0) {
+		fputs("No Vulkan-compatible GPUs found", stderr);
+		exit(EXIT_FAILURE);
+	}
+
+	std::vector<VkPhysicalDevice> physicalDevices(deviceCount);
+	vkEnumeratePhysicalDevices(instance, &deviceCount, physicalDevices.data());
+
+	return physicalDevices;
+}
+
+// TODO : other way to select physical device?
+VkPhysicalDevice selectPhysicalDevice(std::vector<VkPhysicalDevice> devices) {
+	return devices[0];
+}
+
+void printGPUInfo(VkPhysicalDevice device) {
+
+	VkPhysicalDeviceProperties deviceProperties;
+	vkGetPhysicalDeviceProperties(device, &deviceProperties);
+
+	fprintf(stdout,
+			"%s (supports API version %u.%u.%u)\n",
+			deviceProperties.deviceName,
+			VK_VERSION_MAJOR(deviceProperties.apiVersion),
+			VK_VERSION_MINOR(deviceProperties.apiVersion),
+			VK_VERSION_PATCH(deviceProperties.apiVersion)
+			);
+
+}
+
 /**
  * returns list of supported device features
  */
@@ -326,8 +365,8 @@ VkDevice createLogicalDevice() {
 	deviceCI.sType                   = VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO;
 	deviceCI.queueCreateInfoCount    = 1;
 	deviceCI.pQueueCreateInfos       = &deviceQueueCI;
-	deviceCI.enabledLayerCount       = static_cast<uint32_t>(validationLayers.size());
-	deviceCI.ppEnabledLayerNames     = validationLayers.data();
+	deviceCI.enabledLayerCount       = static_cast<uint32_t>(instanceLayers.size());
+	deviceCI.ppEnabledLayerNames     = instanceLayers.data();
 	deviceCI.enabledExtensionCount   = static_cast<uint32_t>(deviceExtensions.size());
 	deviceCI.ppEnabledExtensionNames = deviceExtensions.data();
 	deviceCI.pEnabledFeatures        = &deviceFeatures;
@@ -356,6 +395,9 @@ void cleanup() {
 
 int main(int argc, char *argv[]) {
 
+	/*
+	initLayers(instanceLayers);
+
 	window = createWindow(640, 480, "spock");
 
 	initInstanceExtensions(true);
@@ -375,6 +417,9 @@ int main(int argc, char *argv[]) {
 		glfwPollEvents();
 
 	}
+	*/
+
+	printf("Display: %s\n", VK_KHR_DISPLAY_EXTENSION_NAME);
 
 	// TODO : tidy up
 

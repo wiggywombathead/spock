@@ -18,8 +18,8 @@ SHADERS += $(wildcard $(SHADERDIR)/*.frag)
 
 BIN = vktest
 
-ifeq ($(NDEBUG),1)
-	CFLAGS += -DNDEBUG
+ifeq ($(BUILD),debug)
+	CFLAGS += -DDEBUG
 endif
 
 ifeq ($(WS),null)
