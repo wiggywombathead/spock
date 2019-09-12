@@ -1,3 +1,4 @@
+#include <algorithm>
 #include <cstdio>
 #include <vector>
 
@@ -8,21 +9,6 @@
 
 #include <vulkan/vulkan.hpp>
 
-std::vector<const char *> instanceLayers = {
-#if defined(DEBUG)
-    "VK_LAYER_KHRONOS_validation"
-#endif
-};
-
-std::vector<const char *> instanceExtensions = {
-	VK_KHR_SURFACE_EXTENSION_NAME,
-	VK_KHR_DISPLAY_EXTENSION_NAME
-};
-
-std::vector<const char *> deviceExtensions = {
-	VK_KHR_SWAPCHAIN_EXTENSION_NAME
-};
-
 bool validationEnabled = true;
 
 /* global variables (to be put as class members) */
@@ -31,12 +17,12 @@ GLFWwindow *window;
 #endif
 
 VkInstance instance;
-VkSurfaceKHR surface;
 VkPhysicalDevice physicalDevice;
+VkSurfaceKHR surface;
 VkDevice logicalDevice;
-VkQueue graphicsQueue;
-
+VkQueue graphicsQueue, presentQueue;
 uint32_t graphicsFamilyIndex, presentFamilyIndex, transferFamilyIndex;
+VkSwapchainKHR swapchain;
 
 #if !defined(USE_NULLWS)
 void keyboard(GLFWwindow *window, int k, int scancode, int action, int mods) {
@@ -133,18 +119,6 @@ void printSupportedDeviceExtensions() {
 
 }
 
-void printEnabledInstanceExtensions() {
-	for (const char *extension : instanceExtensions) {
-		fprintf(stdout, "%s\n", extension);
-	}
-}
-
-void printEnabledDeviceExtensions() {
-	for (const char *extension : deviceExtensions) {
-		fprintf(stdout, "%s\n", extension);
-	}
-}
-
 bool requestedInstanceLayersSupported(std::vector<const char *> requestedLayers) {
 
 	uint32_t supportedLayerCount;
@@ -173,25 +147,51 @@ bool requestedInstanceLayersSupported(std::vector<const char *> requestedLayers)
 
 }
 
-void initLayers(std::vector<const char *> requestedLayers) {
+std::vector<const char *> initLayers() {
+
+	std::vector<const char *> requestedLayers = {
+#if defined(DEBUG)
+		"VK_LAYER_KHRONOS_validation"
+#endif
+	};
 
 	if (!requestedInstanceLayersSupported(requestedLayers)) {
 		printSupportedInstanceLayers();
 		exit(EXIT_FAILURE);
 	}
 
+	return requestedLayers;
+
 }
 
-void initInstanceExtensions() {
-#if !defined(USE_NULLWS)
-	instanceExtensions.clear();
+std::vector<const char *> initInstanceExtensions() {
 
+	std::vector<const char *> instanceExtensions;
+
+#if defined(USE_NULLWS)
+	instanceExtensions = {
+		VK_KHR_SURFACE_EXTENSION_NAME,
+		VK_KHR_DISPLAY_EXTENSION_NAME
+	};
+#else
 	uint32_t glfwExtensionCount;
 	const char **glfwExtensions = glfwGetRequiredInstanceExtensions(&glfwExtensionCount);
 
 	for (uint32_t i = 0; i < glfwExtensionCount; i++)
 		instanceExtensions.push_back(glfwExtensions[i]);
 #endif
+
+	return instanceExtensions;
+}
+
+std::vector<const char *> initDeviceExtensions() {
+
+	std::vector<const char *> deviceExtensions = {
+		VK_KHR_SWAPCHAIN_EXTENSION_NAME
+	};
+
+	return deviceExtensions;
+
 }
 
 #if !defined(USE_NULLWS)
@@ -211,7 +211,10 @@ GLFWwindow *createWindow(int width, int height, const char *title) {
 }
 #endif
 
-VkInstance createInstance(const char *name) {
+VkInstance createInstance(
+		const char *name,
+		std::vector<const char *> instanceLayers,
+		std::vector<const char *> instanceExtensions) {
 
 	VkInstance instance;
 
@@ -239,22 +242,6 @@ VkInstance createInstance(const char *name) {
 	return instance;
 }
 
-VkSurfaceKHR createSurface() {
-
-	VkSurfaceKHR surface;
-
-	// TODO : make work with nullws (i.e. no glfw)
-#if !defined(USE_NULLWS)
-	if (glfwCreateWindowSurface(instance, window, nullptr, &surface) != VK_SUCCESS) {
-		fputs("Unable to create GLFW surface\n", stderr);
-		exit(EXIT_FAILURE);
-	}
-#endif
-
-	return surface;
-		
-}
-
 std::vector<VkPhysicalDevice> queryPhysicalDevices() {
 
 	// must discover connected physical devices before creating logical device
@@ -275,6 +262,52 @@ std::vector<VkPhysicalDevice> queryPhysicalDevices() {
 // TODO : other way to select physical device?
 VkPhysicalDevice selectPhysicalDevice(std::vector<VkPhysicalDevice> devices) {
 	return devices[0];
+}
+
+VkSurfaceKHR createSurface() {
+
+	VkSurfaceKHR surface;
+
+#if defined(USE_NULLWS)
+
+	uint32_t propertiesCount;
+	vkGetPhysicalDeviceDisplayPropertiesKHR(physicalDevice, &propertiesCount, nullptr);
+
+	std::vector<VkDisplayPropertiesKHR> displayProperties(propertiesCount);
+	vkGetPhysicalDeviceDisplayPropertiesKHR(physicalDevice, &propertiesCount, displayProperties.data());
+
+	// TODO : multi-monitor support would require change here
+	VkDisplayKHR nativeDisplay = displayProperties[0].display;
+
+	uint32_t modeCount;
+	vkGetDisplayModePropertiesKHR(physicalDevice, nativeDisplay, &modeCount, nullptr);
+
+	std::vector<VkDisplayModePropertiesKHR> displayModeProperties(modeCount);
+	vkGetDisplayModePropertiesKHR(physicalDevice, nativeDisplay, &modeCount, displayModeProperties.data());
+
+	VkDisplaySurfaceCreateInfoKHR displaySurfaceCI = {};
+	displaySurfaceCI.sType           = VK_STRUCTURE_TYPE_DISPLAY_SURFACE_CREATE_INFO_KHR;
+	displaySurfaceCI.displayMode     = displayModeProperties[0].displayMode;
+	displaySurfaceCI.planeIndex      = 0;
+	displaySurfaceCI.planeStackIndex = 0;
+	displaySurfaceCI.transform       = VK_SURFACE_TRANSFORM_IDENTITY_BIT_KHR;
+	displaySurfaceCI.globalAlpha     = 0.0f;
+	displaySurfaceCI.alphaMode       = VK_DISPLAY_PLANE_ALPHA_PER_PIXEL_BIT_KHR;
+	displaySurfaceCI.imageExtent     = displayModeProperties[0].parameters.visibleRegion;
+
+	if (vkCreateDisplayPlaneSurfaceKHR(instance, &displaySurfaceCI, nullptr, &surface) != VK_SUCCESS) {
+		fputs("Could not create surface\n", stderr);
+		exit(EXIT_FAILURE);
+	}
+#else
+	if (glfwCreateWindowSurface(instance, window, nullptr, &surface) != VK_SUCCESS) {
+		fputs("Unable to create GLFW surface\n", stderr);
+		exit(EXIT_FAILURE);
+	}
+#endif
+
+	return surface;
+		
 }
 
 void printGPUInfo(VkPhysicalDevice device) {
@@ -316,7 +349,7 @@ int getQueueFamilyIndex(VkPhysicalDevice device, VkQueueFlagBits queueBits) {
 	for (uint32_t i = 0; i < queueFamilyCount; i++) {
 
 		// TODO : if we want queues with priorities, need >= 2 queues
-		if (queueFamilies[i].queueFlags & queueBits)
+		if (queueFamilies[i].queueCount > 0 && queueFamilies[i].queueFlags & queueBits)
 			return i;
 
 	}
@@ -327,7 +360,7 @@ int getQueueFamilyIndex(VkPhysicalDevice device, VkQueueFlagBits queueBits) {
 /**
  * get the index of a queue family capable of presenting swapchain images
  */
-int getPresentationCapableQueueIndex(VkPhysicalDevice device, VkSurfaceKHR surface) {
+int getPresentationCapableQueueFamilyIndex(VkPhysicalDevice device, VkSurfaceKHR surface) {
 
 	uint32_t queueFamilyCount;
 	vkGetPhysicalDeviceQueueFamilyProperties(device, &queueFamilyCount, nullptr);
@@ -348,13 +381,13 @@ int getPresentationCapableQueueIndex(VkPhysicalDevice device, VkSurfaceKHR surfa
 	return -1;
 }
 
-VkDevice createLogicalDevice() {
+VkDevice createLogicalDevice(std::vector<const char *> deviceExtensions) {
 
-	// get graphics queue family index
+	// get index of graphics queue family
 	graphicsFamilyIndex = getQueueFamilyIndex(physicalDevice, VK_QUEUE_GRAPHICS_BIT);
 
-	// get a queue family
-	presentFamilyIndex = getPresentationCapableQueueIndex(physicalDevice, surface);
+	// get index of presentation-capable queue family
+	presentFamilyIndex = getPresentationCapableQueueFamilyIndex(physicalDevice, surface);
 
 	float queuePriorities[] = { 0.0f };
 
@@ -375,8 +408,8 @@ VkDevice createLogicalDevice() {
 	deviceCI.sType                   = VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO;
 	deviceCI.queueCreateInfoCount    = 1;
 	deviceCI.pQueueCreateInfos       = &deviceQueueCI;
-	deviceCI.enabledLayerCount       = static_cast<uint32_t>(instanceLayers.size());
-	deviceCI.ppEnabledLayerNames     = instanceLayers.data();
+	deviceCI.enabledLayerCount       = 0;
+	deviceCI.ppEnabledLayerNames     = nullptr;
 	deviceCI.enabledExtensionCount   = static_cast<uint32_t>(deviceExtensions.size());
 	deviceCI.ppEnabledExtensionNames = deviceExtensions.data();
 	deviceCI.pEnabledFeatures        = &deviceFeatures;
@@ -389,8 +422,95 @@ VkDevice createLogicalDevice() {
 	}
 
 	vkGetDeviceQueue(logicalDevice, graphicsFamilyIndex, 0, &graphicsQueue);
+	vkGetDeviceQueue(logicalDevice, presentFamilyIndex, 0, &presentQueue);
 
 	return logicalDevice;
+}
+
+VkSurfaceFormatKHR selectSurfaceFormat(VkPhysicalDevice device, VkSurfaceKHR surface) {
+
+	uint32_t surfaceFormatCount;
+	vkGetPhysicalDeviceSurfaceFormatsKHR(device, surface, &surfaceFormatCount, nullptr);
+
+	std::vector<VkSurfaceFormatKHR> availableFormats(surfaceFormatCount);
+	vkGetPhysicalDeviceSurfaceFormatsKHR(device, surface, &surfaceFormatCount, availableFormats.data());
+
+	for (VkSurfaceFormatKHR surfaceFormat : availableFormats) {
+		if (surfaceFormat.format == VK_FORMAT_B8G8R8A8_UNORM && surfaceFormat.colorSpace == VK_COLOR_SPACE_SRGB_NONLINEAR_KHR)
+			return surfaceFormat;
+	}
+
+	return availableFormats[0];
+}
+
+VkSurfaceCapabilitiesKHR getSurfaceCapabilities(VkPhysicalDevice device, VkSurfaceKHR surface) {
+
+	VkSurfaceCapabilitiesKHR surfaceCapabilities;
+	vkGetPhysicalDeviceSurfaceCapabilitiesKHR(device, surface, &surfaceCapabilities);
+
+	return surfaceCapabilities;
+}
+
+#if defined(USE_NULLWS)
+#else
+VkExtent2D getSwapchainExtent(GLFWwindow *window, VkSurfaceCapabilitiesKHR surfaceCapabilities) {
+
+	if (surfaceCapabilities.currentExtent.width == std::numeric_limits<uint32_t>::max() || surfaceCapabilities.currentExtent.height == std::numeric_limits<uint32_t>::min()) {
+		
+		return surfaceCapabilities.currentExtent;
+
+	}
+
+	if (surfaceCapabilities.currentExtent.width == 0 && surfaceCapabilities.currentExtent.height == 0) {
+
+		int width, height;
+		glfwGetFramebufferSize(window, &width, &height);
+
+		VkExtent2D extent = {
+			static_cast<uint32_t>(width),
+			static_cast<uint32_t>(height)
+		};
+
+		extent.width = std::max(
+				surfaceCapabilities.minImageExtent.width,
+				std::min(surfaceCapabilities.maxImageExtent.width, extent.width)
+			);
+
+		extent.height = std::max(
+				surfaceCapabilities.minImageExtent.height,
+				std::min(surfaceCapabilities.maxImageExtent.height, extent.height)
+			);
+
+		return extent;
+	}
+
+}
+#endif
+
+VkSwapchainKHR createSwapchain() {
+
+	VkSurfaceFormatKHR chosenFormat = selectSurfaceFormat(physicalDevice, surface);
+	VkSurfaceCapabilitiesKHR surfaceCapabilities = getSurfaceCapabilities(physicalDevice, surface);
+
+	uint32_t minImageCount = std::max(surfaceCapabilities.minImageCount, 3u);
+
+	VkSwapchainCreateInfoKHR swapchainCI = {};
+	swapchainCI.sType = VK_STRUCTURE_TYPE_SWAPCHAIN_CREATE_INFO_KHR;
+	swapchainCI.surface = surface;
+	swapchainCI.minImageCount = minImageCount;
+	swapchainCI.imageFormat = chosenFormat.format;
+	swapchainCI.imageColorSpace = chosenFormat.colorSpace;
+	// swapchainCI.imageExtent = ;
+	// swapchainCI.
+
+	VkSwapchainKHR swapchain;
+
+	if (vkCreateSwapchainKHR(logicalDevice, &swapchainCI, nullptr, &swapchain) != VK_SUCCESS) {
+		fputs("Could not create swapchain\n", stderr);
+		exit(EXIT_FAILURE);
+	}
+
+	return swapchain;
 }
 
 void loop() {
@@ -407,9 +527,11 @@ void loop() {
 
 void cleanup() {
 
-	// vkDeviceWaitIdle(logicalDevice);
+	vkDeviceWaitIdle(logicalDevice);
 
-	// vkDestroyDevice(logicalDevice, nullptr);
+	vkDestroySurfaceKHR(instance, surface, nullptr);
+
+	vkDestroyDevice(logicalDevice, nullptr);
 
 	vkDestroyInstance(instance, nullptr);
 
@@ -417,27 +539,28 @@ void cleanup() {
 
 int main(int argc, char *argv[]) {
 
-	initLayers(instanceLayers);
-
 #if !defined(USE_NULLWS)
 	window = createWindow(640, 480, "spock");
 #endif
 
-	initInstanceExtensions();
-	printEnabledInstanceExtensions();
+	std::vector<const char *> instanceLayers = initLayers();
+	std::vector<const char *> instanceExtensions = initInstanceExtensions();
 
-	instance = createInstance("spock");
+	instance = createInstance("spock", instanceLayers, instanceExtensions);
+	// printEnabledInstanceExtensions();
 
-	surface = createSurface();
+	std::vector<const char *> deviceExtensions = initDeviceExtensions();
 
 	std::vector<VkPhysicalDevice> physicalDevices = queryPhysicalDevices();
 	physicalDevice = selectPhysicalDevice(physicalDevices);
 
-	// logicalDevice = createLogicalDevice();
+	surface = createSurface();
+
+	logicalDevice = createLogicalDevice(deviceExtensions);
+
+	// swapchain = createSwapchain();
 
 	loop();
-
-	printf("Display: %s\n", VK_KHR_DISPLAY_EXTENSION_NAME);
 
 	// TODO : clean up after we're done
 
