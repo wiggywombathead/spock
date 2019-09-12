@@ -1,8 +1,11 @@
 #include <cstdio>
 #include <vector>
 
+#if defined(USE_NULLWS)
 #define GLFW_INCLUDE_VULKAN
 #include <GLFW/glfw3.h>
+#endif
+
 #include <vulkan/vulkan.hpp>
 
 std::vector<const char *> instanceLayers = {
@@ -23,7 +26,10 @@ std::vector<const char *> deviceExtensions = {
 bool validationEnabled = true;
 
 /* global variables (to be put as class members) */
+#if defined(USE_NULLWS)
 GLFWwindow *window;
+#endif
+
 VkInstance instance;
 VkSurfaceKHR surface;
 VkPhysicalDevice physicalDevice;
@@ -32,6 +38,7 @@ VkQueue graphicsQueue;
 
 uint32_t graphicsFamilyIndex, presentFamilyIndex, transferFamilyIndex;
 
+#if defined(USE_NULLWS)
 void keyboard(GLFWwindow *window, int k, int scancode, int action, int mods) {
 	switch (k) {
 	case GLFW_KEY_ESCAPE:
@@ -40,6 +47,7 @@ void keyboard(GLFWwindow *window, int k, int scancode, int action, int mods) {
 		break;
 	}
 }
+#endif
 
 /**
  * prints supported instance layers
@@ -175,19 +183,21 @@ void initLayers(std::vector<const char *> requestedLayers) {
 }
 
 // TODO : nicer way of switching between nullws/glfw
-void initInstanceExtensions(bool useGLFW) {
+void initInstanceExtensions() {
 
-	if (useGLFW) {
-		instanceExtensions.clear();
+#if defined(USE_NULLWS)
+	instanceExtensions.clear();
 
-		uint32_t glfwExtensionCount;
-		const char **glfwExtensions = glfwGetRequiredInstanceExtensions(&glfwExtensionCount);
+	uint32_t glfwExtensionCount;
+	const char **glfwExtensions = glfwGetRequiredInstanceExtensions(&glfwExtensionCount);
 
-		for (uint32_t i = 0; i < glfwExtensionCount; i++)
-			instanceExtensions.push_back(glfwExtensions[i]);
-	}
+	for (uint32_t i = 0; i < glfwExtensionCount; i++)
+		instanceExtensions.push_back(glfwExtensions[i]);
+#endif
+
 }
 
+#if defined(USE_NULLWS)
 GLFWwindow *createWindow(int width, int height, const char *title) {
 
 	GLFWwindow *window;
@@ -202,6 +212,7 @@ GLFWwindow *createWindow(int width, int height, const char *title) {
 
 	return window;
 }
+#endif
 
 VkInstance createInstance(const char *name) {
 
@@ -236,10 +247,12 @@ VkSurfaceKHR createSurface() {
 	VkSurfaceKHR surface;
 
 	// TODO : make work with nullws (i.e. no glfw)
+#if defined(USE_NULLWS)
 	if (glfwCreateWindowSurface(instance, window, nullptr, &surface) != VK_SUCCESS) {
 		fputs("Unable to create GLFW surface\n", stderr);
 		exit(EXIT_FAILURE);
 	}
+#endif
 
 	return surface;
 		
