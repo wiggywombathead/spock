@@ -182,9 +182,7 @@ void initLayers(std::vector<const char *> requestedLayers) {
 
 }
 
-// TODO : nicer way of switching between nullws/glfw
 void initInstanceExtensions() {
-
 #if !defined(USE_NULLWS)
 	instanceExtensions.clear();
 
@@ -194,7 +192,6 @@ void initInstanceExtensions() {
 	for (uint32_t i = 0; i < glfwExtensionCount; i++)
 		instanceExtensions.push_back(glfwExtensions[i]);
 #endif
-
 }
 
 #if !defined(USE_NULLWS)
@@ -396,6 +393,18 @@ VkDevice createLogicalDevice() {
 	return logicalDevice;
 }
 
+void loop() {
+#if defined(USE_NULLWS)
+	while (1)
+		;
+#else
+	while (!glfwWindowShouldClose(window)) {
+		glfwPollEvents();
+
+	}
+#endif
+}
+
 void cleanup() {
 
 	// vkDeviceWaitIdle(logicalDevice);
@@ -408,12 +417,14 @@ void cleanup() {
 
 int main(int argc, char *argv[]) {
 
-	/*
 	initLayers(instanceLayers);
 
+#if !defined(USE_NULLWS)
 	window = createWindow(640, 480, "spock");
+#endif
 
-	initInstanceExtensions(true);
+	initInstanceExtensions();
+	printEnabledInstanceExtensions();
 
 	instance = createInstance("spock");
 
@@ -422,19 +433,13 @@ int main(int argc, char *argv[]) {
 	std::vector<VkPhysicalDevice> physicalDevices = queryPhysicalDevices();
 	physicalDevice = selectPhysicalDevice(physicalDevices);
 
-	logicalDevice = createLogicalDevice();
+	// logicalDevice = createLogicalDevice();
 
-	printEnabledInstanceExtensions();
-
-	while (!glfwWindowShouldClose(window)) {
-		glfwPollEvents();
-
-	}
-	*/
+	loop();
 
 	printf("Display: %s\n", VK_KHR_DISPLAY_EXTENSION_NAME);
 
-	// TODO : tidy up
+	// TODO : clean up after we're done
 
 	// printGPUInfo(physicalDevice);
 	// printSupportedInstanceLayers();
