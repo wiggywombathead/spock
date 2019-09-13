@@ -427,20 +427,15 @@ VkDevice createLogicalDevice(std::vector<const char *> deviceExtensions) {
 	return logicalDevice;
 }
 
-VkSurfaceFormatKHR selectSurfaceFormat(VkPhysicalDevice device, VkSurfaceKHR surface) {
+std::vector<VkSurfaceFormatKHR> getSurfaceFormats(VkPhysicalDevice device, VkSurfaceKHR surface) {
 
 	uint32_t surfaceFormatCount;
 	vkGetPhysicalDeviceSurfaceFormatsKHR(device, surface, &surfaceFormatCount, nullptr);
 
-	std::vector<VkSurfaceFormatKHR> availableFormats(surfaceFormatCount);
-	vkGetPhysicalDeviceSurfaceFormatsKHR(device, surface, &surfaceFormatCount, availableFormats.data());
+	std::vector<VkSurfaceFormatKHR> surfaceFormats(surfaceFormatCount);
+	vkGetPhysicalDeviceSurfaceFormatsKHR(device, surface, &surfaceFormatCount, surfaceFormats.data());
 
-	for (VkSurfaceFormatKHR surfaceFormat : availableFormats) {
-		if (surfaceFormat.format == VK_FORMAT_B8G8R8A8_UNORM && surfaceFormat.colorSpace == VK_COLOR_SPACE_SRGB_NONLINEAR_KHR)
-			return surfaceFormat;
-	}
-
-	return availableFormats[0];
+	return surfaceFormats;
 }
 
 VkSurfaceCapabilitiesKHR getSurfaceCapabilities(VkPhysicalDevice device, VkSurfaceKHR surface) {
@@ -451,12 +446,86 @@ VkSurfaceCapabilitiesKHR getSurfaceCapabilities(VkPhysicalDevice device, VkSurfa
 	return surfaceCapabilities;
 }
 
+std::vector<VkPresentModeKHR> getSurfacePresentModes(VkPhysicalDevice device, VkSurfaceKHR surface) {
+
+	uint32_t presentModesCount;
+	vkGetPhysicalDeviceSurfacePresentModesKHR(device, surface, &presentModesCount, nullptr);
+
+	std::vector<VkPresentModeKHR> presentModes(presentModesCount);
+	vkGetPhysicalDeviceSurfacePresentModesKHR(device, surface, &presentModesCount, presentModes.data());
+
+	return presentModes;
+}
+
+VkSurfaceFormatKHR selectSurfaceFormat(VkPhysicalDevice device, VkSurfaceKHR surface, VkFormat desiredFormat) {
+
+	std::vector<VkSurfaceFormatKHR> availableFormats = getSurfaceFormats(device, surface);
+
+	for (VkSurfaceFormatKHR surfaceFormat : availableFormats) {
+		if (surfaceFormat.format == desiredFormat && surfaceFormat.colorSpace == VK_COLOR_SPACE_SRGB_NONLINEAR_KHR)
+			return surfaceFormat;
+	}
+
+	return availableFormats[0];
+}
+
+VkPresentModeKHR selectPresentMode(VkPhysicalDevice device, VkSurfaceKHR surface, VkPresentModeKHR desiredPresentMode) {
+
+	std::vector<VkPresentModeKHR> availablePresentModes = getSurfacePresentModes(device, surface);
+
+	for (VkPresentModeKHR presentMode : availablePresentModes) {
+		if (presentMode == desiredPresentMode) {
+			return presentMode;
+		}
+	}
+
+	return VK_PRESENT_MODE_FIFO_KHR;
+}
+
 #if defined(USE_NULLWS)
+VkExtent2D getSwapchainExtent(VkSurfaceCapabilitiesKHR surfaceCapabilities) {
+
+	if (surfaceCapabilities.currentExtent.width == std::numeric_limits<uint32_t>::max() || surfaceCapabilities.currentExtent.height == std::numeric_limits<uint32_t>::min()) {
+		
+		VkExtent2D swapchainExtent = {
+			.width = static_cast<uint32_t>(0),
+			.height = static_cast<uint32_t>(0)
+		};
+
+		VkExtent2D extent = swapchainExtent;
+
+		if (swapchainExtent.width < surfaceCapabilities.minImageExtent.width) {
+			extent.width = surfaceCapabilities.minImageExtent.width;
+		} else if (swapchainExtent.width > surfaceCapabilities.maxImageExtent.width) {
+			extent.width = surfaceCapabilities.maxImageExtent.width;
+		}
+
+		if (swapchainExtent.height < surfaceCapabilities.minImageExtent.height) {
+			extent.height = surfaceCapabilities.minImageExtent.height;
+		} else if (swapchainExtent.width > surfaceCapabilities.maxImageExtent.height) {
+			extent.height = surfaceCapabilities.maxImageExtent.height;
+		}
+
+		return extent;
+
+	}
+
+	/* TODO : deal with this case
+	 * This may be the case when the window is minimized, in which case it is impossible to create a
+	 * swapchain according to the Valid Usage requirements
+	 */
+	if (surfaceCapabilities.currentExtent.width == 0 && surfaceCapabilities.currentExtent.height == 0) {
+		fputs("I don't know what has happened or what to do :( bad extent\n", stderr);
+		return surfaceCapabilities.currentExtent;
+	}
+
+	return surfaceCapabilities.currentExtent;
+}
 #else
 VkExtent2D getSwapchainExtent(GLFWwindow *window, VkSurfaceCapabilitiesKHR surfaceCapabilities) {
 
 	if (surfaceCapabilities.currentExtent.width == std::numeric_limits<uint32_t>::max() || surfaceCapabilities.currentExtent.height == std::numeric_limits<uint32_t>::min()) {
-		
+
 		return surfaceCapabilities.currentExtent;
 
 	}
@@ -474,12 +543,12 @@ VkExtent2D getSwapchainExtent(GLFWwindow *window, VkSurfaceCapabilitiesKHR surfa
 		extent.width = std::max(
 				surfaceCapabilities.minImageExtent.width,
 				std::min(surfaceCapabilities.maxImageExtent.width, extent.width)
-			);
+				);
 
 		extent.height = std::max(
 				surfaceCapabilities.minImageExtent.height,
 				std::min(surfaceCapabilities.maxImageExtent.height, extent.height)
-			);
+				);
 
 		return extent;
 	}
@@ -487,21 +556,59 @@ VkExtent2D getSwapchainExtent(GLFWwindow *window, VkSurfaceCapabilitiesKHR surfa
 }
 #endif
 
+bool imageUsageSupported(VkImageUsageFlags desiredUsage, VkSurfaceCapabilitiesKHR surfaceCapabilities) {
+
+	return desiredUsage & surfaceCapabilities.supportedUsageFlags;
+
+}
+
+bool surfaceTransformSupported(VkSurfaceTransformFlagBitsKHR desiredTransform, VkSurfaceCapabilitiesKHR surfaceCapabilities) {
+	return surfaceCapabilities.supportedTransforms & desiredTransform;
+}
+
+VkSurfaceTransformFlagBitsKHR getSupportedSurfaceTransform(VkSurfaceCapabilitiesKHR surfaceCapabilities) {
+
+	int mask = 0x1;
+	
+}
+
 VkSwapchainKHR createSwapchain() {
 
-	VkSurfaceFormatKHR chosenFormat = selectSurfaceFormat(physicalDevice, surface);
 	VkSurfaceCapabilitiesKHR surfaceCapabilities = getSurfaceCapabilities(physicalDevice, surface);
 
-	uint32_t minImageCount = std::max(surfaceCapabilities.minImageCount, 3u);
+	VkSurfaceFormatKHR chosenFormat = selectSurfaceFormat(physicalDevice, surface, VK_FORMAT_B8G8R8A8_UNORM);
+	VkPresentModeKHR chosenPresentMode = selectPresentMode(physicalDevice, surface, VK_PRESENT_MODE_MAILBOX_KHR);
 
 	VkSwapchainCreateInfoKHR swapchainCI = {};
-	swapchainCI.sType = VK_STRUCTURE_TYPE_SWAPCHAIN_CREATE_INFO_KHR;
-	swapchainCI.surface = surface;
-	swapchainCI.minImageCount = minImageCount;
-	swapchainCI.imageFormat = chosenFormat.format;
-	swapchainCI.imageColorSpace = chosenFormat.colorSpace;
-	// swapchainCI.imageExtent = ;
-	// swapchainCI.
+	swapchainCI.sType            = VK_STRUCTURE_TYPE_SWAPCHAIN_CREATE_INFO_KHR;
+	swapchainCI.surface          = surface;
+	swapchainCI.minImageCount    = std::max<uint32_t>(surfaceCapabilities.minImageCount, 3);
+	swapchainCI.imageFormat      = chosenFormat.format;
+	swapchainCI.imageColorSpace  = chosenFormat.colorSpace;
+	swapchainCI.imageExtent      = getSwapchainExtent(surfaceCapabilities);
+	swapchainCI.imageArrayLayers = 1;
+	swapchainCI.imageUsage       = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT;
+
+	if (graphicsFamilyIndex == presentFamilyIndex) {
+		swapchainCI.imageSharingMode      = VK_SHARING_MODE_EXCLUSIVE;
+		swapchainCI.queueFamilyIndexCount = 0;
+		swapchainCI.pQueueFamilyIndices   = nullptr;
+	} else {
+
+		uint32_t queueFamilyIndices[] = { graphicsFamilyIndex, presentFamilyIndex };
+
+		swapchainCI.imageSharingMode      = VK_SHARING_MODE_CONCURRENT;
+		swapchainCI.queueFamilyIndexCount = 2;
+		swapchainCI.pQueueFamilyIndices   = queueFamilyIndices;
+	}
+
+	swapchainCI.preTransform = surfaceCapabilities.currentTransform;
+
+	// TODO : check for support on this?
+	swapchainCI.compositeAlpha = VK_COMPOSITE_ALPHA_OPAQUE_BIT_KHR;
+	swapchainCI.presentMode    = chosenPresentMode;
+	swapchainCI.clipped        = VK_TRUE;
+	swapchainCI.oldSwapchain   = VK_NULL_HANDLE;
 
 	VkSwapchainKHR swapchain;
 
@@ -558,7 +665,7 @@ int main(int argc, char *argv[]) {
 
 	logicalDevice = createLogicalDevice(deviceExtensions);
 
-	// swapchain = createSwapchain();
+	swapchain = createSwapchain();
 
 	loop();
 
