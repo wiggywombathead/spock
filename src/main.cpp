@@ -22,7 +22,10 @@ VkSurfaceKHR surface;
 VkDevice logicalDevice;
 VkQueue graphicsQueue, presentQueue;
 uint32_t graphicsFamilyIndex, presentFamilyIndex, transferFamilyIndex;
+
 VkSwapchainKHR swapchain;
+VkSurfaceFormatKHR swapchainFormat;
+VkPresentModeKHR swapchainPresentMode;
 
 #if !defined(USE_NULLWS)
 void keyboard(GLFWwindow *window, int k, int scancode, int action, int mods) {
@@ -557,34 +560,33 @@ VkExtent2D getSwapchainExtentGLFW(GLFWwindow *window, VkSurfaceCapabilitiesKHR s
 #endif
 
 bool imageUsageSupported(VkImageUsageFlags desiredUsage, VkSurfaceCapabilitiesKHR surfaceCapabilities) {
-
 	return desiredUsage & surfaceCapabilities.supportedUsageFlags;
-
 }
 
 bool surfaceTransformSupported(VkSurfaceTransformFlagBitsKHR desiredTransform, VkSurfaceCapabilitiesKHR surfaceCapabilities) {
 	return surfaceCapabilities.supportedTransforms & desiredTransform;
 }
 
+// TODO??
 VkSurfaceTransformFlagBitsKHR getSupportedSurfaceTransform(VkSurfaceCapabilitiesKHR surfaceCapabilities) {
-
-	int mask = 0x1;
-	
 }
 
 VkSwapchainKHR createSwapchain() {
 
 	VkSurfaceCapabilitiesKHR surfaceCapabilities = getSurfaceCapabilities(physicalDevice, surface);
 
-	VkSurfaceFormatKHR chosenFormat = selectSurfaceFormat(physicalDevice, surface, VK_FORMAT_B8G8R8A8_UNORM);
-	VkPresentModeKHR chosenPresentMode = selectPresentMode(physicalDevice, surface, VK_PRESENT_MODE_MAILBOX_KHR);
+	VkSurfaceFormatKHR surfaceFormat = selectSurfaceFormat(physicalDevice, surface, VK_FORMAT_B8G8R8A8_UNORM);
+	VkPresentModeKHR surfacePresentMode = selectPresentMode(physicalDevice, surface, VK_PRESENT_MODE_MAILBOX_KHR);
+
+	swapchainFormat = surfaceFormat;
+	swapchainPresentMode = surfacePresentMode;
 
 	VkSwapchainCreateInfoKHR swapchainCI = {};
 	swapchainCI.sType            = VK_STRUCTURE_TYPE_SWAPCHAIN_CREATE_INFO_KHR;
 	swapchainCI.surface          = surface;
 	swapchainCI.minImageCount    = std::max<uint32_t>(surfaceCapabilities.minImageCount, 3);
-	swapchainCI.imageFormat      = chosenFormat.format;
-	swapchainCI.imageColorSpace  = chosenFormat.colorSpace;
+	swapchainCI.imageFormat      = surfaceFormat.format;
+	swapchainCI.imageColorSpace  = surfaceFormat.colorSpace;
 
 #if defined(USE_NULLWS)
 	swapchainCI.imageExtent      = getSwapchainExtent(surfaceCapabilities);
@@ -612,7 +614,7 @@ VkSwapchainKHR createSwapchain() {
 
 	// TODO : check for support on this?
 	swapchainCI.compositeAlpha = VK_COMPOSITE_ALPHA_OPAQUE_BIT_KHR;
-	swapchainCI.presentMode    = chosenPresentMode;
+	swapchainCI.presentMode    = surfacePresentMode;
 	swapchainCI.clipped        = VK_TRUE;
 	swapchainCI.oldSwapchain   = VK_NULL_HANDLE;
 
@@ -624,6 +626,42 @@ VkSwapchainKHR createSwapchain() {
 	}
 
 	return swapchain;
+}
+
+void createImageViews() {
+	
+	uint32_t swapchainImageCount;
+	vkGetSwapchainImagesKHR(logicalDevice, swapchain, &swapchainImageCount, nullptr);
+
+	std::vector<VkImage> swapchainImages(swapchainImageCount);
+	vkGetSwapchainImagesKHR(logicalDevice, swapchain, &swapchainImageCount, swapchainImages.data());
+
+	std::vector<VkImageView> swapchainImageViews(swapchainImageCount);
+
+	for (uint32_t i = 0; i < swapchainImageCount; i++) {
+
+		VkImageViewCreateInfo imageViewCI = {};
+		imageViewCI.sType    = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
+		imageViewCI.image    = swapchainImages[i];
+		imageViewCI.viewType = VK_IMAGE_VIEW_TYPE_2D;
+		imageViewCI.format   = swapchainFormat.format;
+		imageViewCI.components = {
+			.r = VK_COMPONENT_SWIZZLE_IDENTITY,
+			.g = VK_COMPONENT_SWIZZLE_IDENTITY,
+			.b = VK_COMPONENT_SWIZZLE_IDENTITY,
+			.a = VK_COMPONENT_SWIZZLE_IDENTITY
+		};
+		imageViewCI.subresourceRange = {
+			.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT,
+			.baseMipLevel = 0,
+			.levelCount = 1,
+			.baseArrayLayer = 0,
+			.layerCount = 1
+		};
+		
+		vkCreateImageView(logicalDevice, &imageViewCI, nullptr, &swapchainImageViews[i]);
+
+	}
 }
 
 void loop() {
@@ -672,6 +710,8 @@ int main(int argc, char *argv[]) {
 	logicalDevice = createLogicalDevice(deviceExtensions);
 
 	swapchain = createSwapchain();
+
+	createImageViews();
 
 	loop();
 
