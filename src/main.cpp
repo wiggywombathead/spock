@@ -522,7 +522,7 @@ VkExtent2D getSwapchainExtent(VkSurfaceCapabilitiesKHR surfaceCapabilities) {
 	return surfaceCapabilities.currentExtent;
 }
 #else
-VkExtent2D getSwapchainExtent(GLFWwindow *window, VkSurfaceCapabilitiesKHR surfaceCapabilities) {
+VkExtent2D getSwapchainExtentGLFW(GLFWwindow *window, VkSurfaceCapabilitiesKHR surfaceCapabilities) {
 
 	if (surfaceCapabilities.currentExtent.width == std::numeric_limits<uint32_t>::max() || surfaceCapabilities.currentExtent.height == std::numeric_limits<uint32_t>::min()) {
 
@@ -585,7 +585,13 @@ VkSwapchainKHR createSwapchain() {
 	swapchainCI.minImageCount    = std::max<uint32_t>(surfaceCapabilities.minImageCount, 3);
 	swapchainCI.imageFormat      = chosenFormat.format;
 	swapchainCI.imageColorSpace  = chosenFormat.colorSpace;
+
+#if defined(USE_NULLWS)
 	swapchainCI.imageExtent      = getSwapchainExtent(surfaceCapabilities);
+#else
+	swapchainCI.imageExtent      = getSwapchainExtentGLFW(window, surfaceCapabilities);
+#endif
+
 	swapchainCI.imageArrayLayers = 1;
 	swapchainCI.imageUsage       = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT;
 
