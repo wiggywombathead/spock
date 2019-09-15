@@ -529,12 +529,6 @@ VkExtent2D getSwapchainExtentGLFW(GLFWwindow *window, VkSurfaceCapabilitiesKHR s
 
 	if (surfaceCapabilities.currentExtent.width == std::numeric_limits<uint32_t>::max() || surfaceCapabilities.currentExtent.height == std::numeric_limits<uint32_t>::min()) {
 
-		return surfaceCapabilities.currentExtent;
-
-	}
-
-	if (surfaceCapabilities.currentExtent.width == 0 && surfaceCapabilities.currentExtent.height == 0) {
-
 		int width, height;
 		glfwGetFramebufferSize(window, &width, &height);
 
@@ -554,6 +548,9 @@ VkExtent2D getSwapchainExtentGLFW(GLFWwindow *window, VkSurfaceCapabilitiesKHR s
 				);
 
 		return extent;
+
+	} else {
+		return surfaceCapabilities.currentExtent;
 	}
 
 }
