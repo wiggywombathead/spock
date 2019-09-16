@@ -29,6 +29,8 @@ VkSurfaceFormatKHR swapchainFormat;
 VkPresentModeKHR swapchainPresentMode;
 std::vector<VkImageView> swapchainImageViews;
 
+VkCommandPool commandPool;
+
 VkImage depthBuffer;
 VkDeviceMemory depthBufferMemory;
 VkImageView depthBufferView;
@@ -634,6 +636,34 @@ VkSwapchainKHR createSwapchain() {
 	return swapchain;
 }
 
+VkImageView createImageView(VkImage image, VkFormat format, VkImageAspectFlags aspectMask) {
+
+	VkImageViewCreateInfo imageViewCI = {};
+	imageViewCI.sType    = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
+	imageViewCI.image    = image;
+	imageViewCI.viewType = VK_IMAGE_VIEW_TYPE_2D;
+	imageViewCI.format   = format;
+	imageViewCI.components = {
+		.r = VK_COMPONENT_SWIZZLE_IDENTITY,
+		.g = VK_COMPONENT_SWIZZLE_IDENTITY,
+		.b = VK_COMPONENT_SWIZZLE_IDENTITY,
+		.a = VK_COMPONENT_SWIZZLE_IDENTITY
+	};
+	imageViewCI.subresourceRange = {
+		.aspectMask = aspectMask,
+		.baseMipLevel = 0,
+		.levelCount = 1,
+		.baseArrayLayer = 0,
+		.layerCount = 1
+	};
+
+	VkImageView imageView;
+
+	vkCreateImageView(logicalDevice, &imageViewCI, nullptr, &imageView);
+
+	return imageView;
+}
+
 std::vector<VkImageView> createImageViews() {
 	
 	uint32_t swapchainImageCount;
@@ -646,26 +676,7 @@ std::vector<VkImageView> createImageViews() {
 
 	for (uint32_t i = 0; i < swapchainImageCount; i++) {
 
-		VkImageViewCreateInfo imageViewCI = {};
-		imageViewCI.sType    = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
-		imageViewCI.image    = swapchainImages[i];
-		imageViewCI.viewType = VK_IMAGE_VIEW_TYPE_2D;
-		imageViewCI.format   = swapchainFormat.format;
-		imageViewCI.components = {
-			.r = VK_COMPONENT_SWIZZLE_IDENTITY,
-			.g = VK_COMPONENT_SWIZZLE_IDENTITY,
-			.b = VK_COMPONENT_SWIZZLE_IDENTITY,
-			.a = VK_COMPONENT_SWIZZLE_IDENTITY
-		};
-		imageViewCI.subresourceRange = {
-			.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT,
-			.baseMipLevel = 0,
-			.levelCount = 1,
-			.baseArrayLayer = 0,
-			.layerCount = 1
-		};
-		
-		vkCreateImageView(logicalDevice, &imageViewCI, nullptr, &swapchainImageViews[i]);
+		swapchainImageViews[i] = createImageView(swapchainImages[i], swapchainFormat.format, VK_IMAGE_ASPECT_COLOR_BIT);
 
 	}
 
@@ -716,22 +727,28 @@ uint32_t getMemoryType(VkPhysicalDevice device, uint32_t typeBits, VkMemoryPrope
 	exit(EXIT_FAILURE);
 }
 
-VkImage createDepthBuffer() {
-
-	VkFormat depthFormat = selectDepthFormat(physicalDevice);
+void createImage(
+		VkImage &image,
+		VkDeviceMemory &imageMemory,
+		uint32_t width,
+		uint32_t height,
+		VkFormat format,
+		VkImageTiling tiling,
+		VkImageUsageFlags usage,
+		VkMemoryPropertyFlags memoryPropertyFlags) {
 
 	VkImageCreateInfo imageCI = {};
 	imageCI.sType         = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO;
 	imageCI.imageType     = VK_IMAGE_TYPE_2D;
-	imageCI.format        = depthFormat;
-	imageCI.extent.width  = swapchainExtent.width;
-	imageCI.extent.height = swapchainExtent.height;
+	imageCI.format        = format;
+	imageCI.extent.width  = width;
+	imageCI.extent.height = height;
 	imageCI.extent.depth  = 1;
 	imageCI.mipLevels     = 1;
 	imageCI.arrayLayers   = 1;
 	imageCI.samples       = VK_SAMPLE_COUNT_1_BIT;
-	imageCI.tiling        = VK_IMAGE_TILING_OPTIMAL;
-	imageCI.usage         = VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT;
+	imageCI.tiling        = tiling;
+	imageCI.usage         = usage;
 	imageCI.sharingMode   = VK_SHARING_MODE_EXCLUSIVE;
 
 	// the following two fields are ignored if sharing mode is not _CONCURRENT
@@ -740,28 +757,61 @@ VkImage createDepthBuffer() {
 
 	imageCI.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
 
-	VkImage depthBuffer;
-	
-	if (vkCreateImage(logicalDevice, &imageCI, nullptr, &depthBuffer) != VK_SUCCESS) {
-		fputs("Failed to create depth buffer\n", stderr);
+	if (vkCreateImage(logicalDevice, &imageCI, nullptr, &image) != VK_SUCCESS) {
+		fputs("Failed to create image\n", stderr);
 		exit(EXIT_FAILURE);
 	}
 
 	// now allocate the memory for the depth buffer image
 	VkMemoryRequirements memoryRequirements;
-	vkGetImageMemoryRequirements(logicalDevice, depthBuffer, &memoryRequirements);
+	vkGetImageMemoryRequirements(logicalDevice, image, &memoryRequirements);
 
 	VkMemoryAllocateInfo memoryAI = {};
 	memoryAI.sType           = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
 	memoryAI.allocationSize  = memoryRequirements.size;
-	memoryAI.memoryTypeIndex = getMemoryType(physicalDevice, memoryRequirements.memoryTypeBits, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
+	memoryAI.memoryTypeIndex = getMemoryType(physicalDevice, memoryRequirements.memoryTypeBits, memoryPropertyFlags);
 
-	if (vkAllocateMemory(logicalDevice, &memoryAI, nullptr, &depthBufferMemory) != VK_SUCCESS) {
+	if (vkAllocateMemory(logicalDevice, &memoryAI, nullptr, &imageMemory) != VK_SUCCESS) {
 		fputs("Unable to allocate memory for depth buffer\n", stderr);
 		exit(EXIT_FAILURE);
 	}
 
+}
+
+// TODO : initialise command pool
+VkCommandBuffer beginCommandRecording() {
+
+	VkCommandBuffer commandBuffer;
+
+	VkCommandBufferAllocateInfo commandBufferAI = {};
+	commandBufferAI.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
+	commandBufferAI.commandPool = commandPool;	// TODO : not initialised
+	commandBufferAI.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
+	commandBufferAI.commandBufferCount = 1;
+
+}
+
+void transitionImageLayout(VkImage image, VkFormat format, VkImageLayout oldLayout, VkImageLayout newLayout) {
+
+	VkCommandBuffer commandBuffer = beginCommandRecording();
+
+}
+
+VkImage createDepthBuffer() {
+
+	VkFormat depthFormat = selectDepthFormat(physicalDevice);
+
+	createImage(
+			depthBuffer, depthBufferMemory,
+			swapchainExtent.width, swapchainExtent.height, depthFormat,
+			VK_IMAGE_TILING_OPTIMAL,
+			VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT,
+			VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT
+			);
+
 	vkBindImageMemory(logicalDevice, depthBuffer, depthBufferMemory, 0);
+
+	createImageView(depthBuffer, depthFormat, VK_IMAGE_ASPECT_DEPTH_BIT);
 
 	return depthBuffer;
 }
