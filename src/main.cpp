@@ -24,8 +24,14 @@ VkQueue graphicsQueue, presentQueue;
 uint32_t graphicsFamilyIndex, presentFamilyIndex, transferFamilyIndex;
 
 VkSwapchainKHR swapchain;
+VkExtent2D swapchainExtent;
 VkSurfaceFormatKHR swapchainFormat;
 VkPresentModeKHR swapchainPresentMode;
+std::vector<VkImageView> swapchainImageViews;
+
+VkImage depthBuffer;
+VkDeviceMemory depthBufferMemory;
+VkImageView depthBufferView;
 
 #if !defined(USE_NULLWS)
 void keyboard(GLFWwindow *window, int k, int scancode, int action, int mods) {
@@ -331,7 +337,7 @@ void printGPUInfo(VkPhysicalDevice device) {
 /**
  * returns list of supported device features
  */
-VkPhysicalDeviceFeatures querySupportedFeatures() {
+VkPhysicalDeviceFeatures getSupportedFeatures() {
 	VkPhysicalDeviceFeatures supportedFeatures = {};
 	vkGetPhysicalDeviceFeatures(physicalDevice, &supportedFeatures);
 
@@ -402,7 +408,7 @@ VkDevice createLogicalDevice(std::vector<const char *> deviceExtensions) {
 	deviceQueueCI.pQueuePriorities = queuePriorities;	// default priorities
 
 	// turn on the appropriate (supported) device features
-	VkPhysicalDeviceFeatures supportedFeatures = querySupportedFeatures();
+	VkPhysicalDeviceFeatures supportedFeatures = getSupportedFeatures();
 	VkPhysicalDeviceFeatures deviceFeatures = {};
 	deviceFeatures.fillModeNonSolid = supportedFeatures.fillModeNonSolid;
 	deviceFeatures.samplerAnisotropy = supportedFeatures.samplerAnisotropy;
@@ -582,14 +588,17 @@ VkSwapchainKHR createSwapchain() {
 	swapchainCI.sType            = VK_STRUCTURE_TYPE_SWAPCHAIN_CREATE_INFO_KHR;
 	swapchainCI.surface          = surface;
 	swapchainCI.minImageCount    = std::max<uint32_t>(surfaceCapabilities.minImageCount, 3);
-	swapchainCI.imageFormat      = surfaceFormat.format;
-	swapchainCI.imageColorSpace  = surfaceFormat.colorSpace;
+	swapchainCI.imageFormat      = swapchainFormat.format;
+	swapchainCI.imageColorSpace  = swapchainFormat.colorSpace;
 
+	// store swapchain extent for later
 #if defined(USE_NULLWS)
-	swapchainCI.imageExtent      = getSwapchainExtent(surfaceCapabilities);
+	swapchainExtent = getSwapchainExtent(surfaceCapabilities);
 #else
-	swapchainCI.imageExtent      = getSwapchainExtentGLFW(window, surfaceCapabilities);
+	swapchainExtent = getSwapchainExtentGLFW(window, surfaceCapabilities);
 #endif
+
+	swapchainCI.imageExtent = swapchainExtent;
 
 	swapchainCI.imageArrayLayers = 1;
 	swapchainCI.imageUsage       = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT;
@@ -625,7 +634,7 @@ VkSwapchainKHR createSwapchain() {
 	return swapchain;
 }
 
-void createImageViews() {
+std::vector<VkImageView> createImageViews() {
 	
 	uint32_t swapchainImageCount;
 	vkGetSwapchainImagesKHR(logicalDevice, swapchain, &swapchainImageCount, nullptr);
@@ -659,6 +668,102 @@ void createImageViews() {
 		vkCreateImageView(logicalDevice, &imageViewCI, nullptr, &swapchainImageViews[i]);
 
 	}
+
+	return swapchainImageViews;
+}
+
+VkFormat selectImageFormat(VkPhysicalDevice device, std::vector<VkFormat> desiredFormats, VkImageTiling tiling, VkFormatFeatureFlags features) {
+
+	for (VkFormat format : desiredFormats) {
+
+		VkFormatProperties formatProperties;
+		vkGetPhysicalDeviceFormatProperties(device, format, &formatProperties);
+
+		if (tiling == VK_IMAGE_TILING_LINEAR && (formatProperties.linearTilingFeatures & features) == features)
+			return format;
+		else if (tiling == VK_IMAGE_TILING_OPTIMAL && (formatProperties.optimalTilingFeatures & features) == features)
+			return format;
+	}
+
+	fputs("Unable to find image format supporting the given tiling and features\n", stderr);
+	exit(EXIT_FAILURE);
+}
+
+VkFormat selectDepthFormat(VkPhysicalDevice device) {
+
+	std::vector<VkFormat> candidateDepthFormats = {
+		VK_FORMAT_D32_SFLOAT,
+		VK_FORMAT_D32_SFLOAT_S8_UINT,
+		VK_FORMAT_D24_UNORM_S8_UINT
+	};
+	
+	return selectImageFormat(device, candidateDepthFormats, VK_IMAGE_TILING_OPTIMAL, VK_FORMAT_FEATURE_DEPTH_STENCIL_ATTACHMENT_BIT);
+}
+
+uint32_t getMemoryType(VkPhysicalDevice device, uint32_t typeBits, VkMemoryPropertyFlags desiredProperties) {
+
+	VkPhysicalDeviceMemoryProperties memoryProperties;
+	vkGetPhysicalDeviceMemoryProperties(device, &memoryProperties);
+
+	for (uint32_t i = 0; i < memoryProperties.memoryTypeCount; i++) {
+
+		if ((typeBits & (1 << i)) && (memoryProperties.memoryTypes[i].propertyFlags & desiredProperties) == desiredProperties)
+			return i;
+
+	}
+
+	fputs("Unable to find an associated memory type for the desired memory properties\n", stderr);
+	exit(EXIT_FAILURE);
+}
+
+VkImage createDepthBuffer() {
+
+	VkFormat depthFormat = selectDepthFormat(physicalDevice);
+
+	VkImageCreateInfo imageCI = {};
+	imageCI.sType         = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO;
+	imageCI.imageType     = VK_IMAGE_TYPE_2D;
+	imageCI.format        = depthFormat;
+	imageCI.extent.width  = swapchainExtent.width;
+	imageCI.extent.height = swapchainExtent.height;
+	imageCI.extent.depth  = 1;
+	imageCI.mipLevels     = 1;
+	imageCI.arrayLayers   = 1;
+	imageCI.samples       = VK_SAMPLE_COUNT_1_BIT;
+	imageCI.tiling        = VK_IMAGE_TILING_OPTIMAL;
+	imageCI.usage         = VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT;
+	imageCI.sharingMode   = VK_SHARING_MODE_EXCLUSIVE;
+
+	// the following two fields are ignored if sharing mode is not _CONCURRENT
+	imageCI.queueFamilyIndexCount = 0;
+	imageCI.pQueueFamilyIndices   = nullptr;
+
+	imageCI.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+
+	VkImage depthBuffer;
+	
+	if (vkCreateImage(logicalDevice, &imageCI, nullptr, &depthBuffer) != VK_SUCCESS) {
+		fputs("Failed to create depth buffer\n", stderr);
+		exit(EXIT_FAILURE);
+	}
+
+	// now allocate the memory for the depth buffer image
+	VkMemoryRequirements memoryRequirements;
+	vkGetImageMemoryRequirements(logicalDevice, depthBuffer, &memoryRequirements);
+
+	VkMemoryAllocateInfo memoryAI = {};
+	memoryAI.sType           = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
+	memoryAI.allocationSize  = memoryRequirements.size;
+	memoryAI.memoryTypeIndex = getMemoryType(physicalDevice, memoryRequirements.memoryTypeBits, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
+
+	if (vkAllocateMemory(logicalDevice, &memoryAI, nullptr, &depthBufferMemory) != VK_SUCCESS) {
+		fputs("Unable to allocate memory for depth buffer\n", stderr);
+		exit(EXIT_FAILURE);
+	}
+
+	vkBindImageMemory(logicalDevice, depthBuffer, depthBufferMemory, 0);
+
+	return depthBuffer;
 }
 
 void loop() {
@@ -676,6 +781,12 @@ void loop() {
 void cleanup() {
 
 	vkDeviceWaitIdle(logicalDevice);
+
+	for (VkImageView imageView : swapchainImageViews) {
+		vkDestroyImageView(logicalDevice, imageView, nullptr);
+	}
+
+	vkDestroySwapchainKHR(logicalDevice, swapchain, nullptr);
 
 	vkDestroySurfaceKHR(instance, surface, nullptr);
 
@@ -707,8 +818,9 @@ int main(int argc, char *argv[]) {
 	logicalDevice = createLogicalDevice(deviceExtensions);
 
 	swapchain = createSwapchain();
+	swapchainImageViews = createImageViews();
 
-	createImageViews();
+	depthBuffer = createDepthBuffer();
 
 	loop();
 
