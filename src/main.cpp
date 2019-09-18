@@ -778,23 +778,107 @@ void createImage(
 
 }
 
+VkCommandPool createCommandPool(uint32_t queueFamilyIndex) {
+
+	VkCommandPool commandPool;
+
+	VkCommandPoolCreateInfo commandPoolCI = {};
+	commandPoolCI.sType            = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO;
+	commandPoolCI.flags            = VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT;
+	commandPoolCI.queueFamilyIndex = queueFamilyIndex;
+
+	if (vkCreateCommandPool(logicalDevice, &commandPoolCI, nullptr, &commandPool) != VK_SUCCESS) {
+		fputs("Unable to create command pool\n", stderr);
+		exit(EXIT_FAILURE);
+	}
+
+	return commandPool;
+
+}
+
 // TODO : initialise command pool
-VkCommandBuffer beginCommandRecording() {
+VkCommandBuffer beginCommandRecording(VkCommandPool commandPool) {
 
 	VkCommandBuffer commandBuffer;
 
 	VkCommandBufferAllocateInfo commandBufferAI = {};
-	commandBufferAI.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
-	commandBufferAI.commandPool = commandPool;	// TODO : not initialised
-	commandBufferAI.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
+	commandBufferAI.sType              = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
+	commandBufferAI.commandPool        = commandPool;
+	commandBufferAI.level              = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
 	commandBufferAI.commandBufferCount = 1;
 
+	vkAllocateCommandBuffers(logicalDevice, &commandBufferAI, &commandBuffer);
+
+	VkCommandBufferBeginInfo commandBufferBI = {};
+	commandBufferBI.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
+	commandBufferBI.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
+
+	vkBeginCommandBuffer(commandBuffer, &commandBufferBI);
+
+}
+
+void submitCommandBuffer(VkCommandPool commandPool, VkCommandBuffer commandBuffer, VkQueue queue) {
+
+	VkSubmitInfo submitI = {};
+	submitI.sType              = VK_STRUCTURE_TYPE_SUBMIT_INFO;
+	submitI.commandBufferCount = 1;
+	submitI.pCommandBuffers    = &commandBuffer;
+
+	vkQueueSubmit(queue, 1, &submitI, VK_NULL_HANDLE);
+
+	// TODO : change when synchronisation implemented
+	vkQueueWaitIdle(queue);
+
+	// TODO : have option to free or just reset command buffer (less $$$)
+	vkFreeCommandBuffers(logicalDevice, commandPool, 1, &commandBuffer);
+}
+
+void endCommandRecording(VkCommandBuffer commandBuffer) {
+
+	vkEndCommandBuffer(commandBuffer);
+
+}
+
+bool hasStencilComponent(VkFormat format) {
+	return format == VK_FORMAT_D32_SFLOAT_S8_UINT || format == VK_FORMAT_D24_UNORM_S8_UINT;
 }
 
 void transitionImageLayout(VkImage image, VkFormat format, VkImageLayout oldLayout, VkImageLayout newLayout) {
 
-	VkCommandBuffer commandBuffer = beginCommandRecording();
+	VkCommandBuffer commandBuffer = beginCommandRecording(commandPool);
 
+	VkImageMemoryBarrier imageMemoryBarrier = {};
+	imageMemoryBarrier.sType               = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
+	imageMemoryBarrier.oldLayout           = oldLayout;
+	imageMemoryBarrier.newLayout           = newLayout;
+	imageMemoryBarrier.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+	imageMemoryBarrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+	imageMemoryBarrier.image               = image;
+	imageMemoryBarrier.subresourceRange = {
+		.aspectMask     = VK_IMAGE_ASPECT_COLOR_BIT,
+		.baseMipLevel   = 0,
+		.levelCount     = 1,
+		.baseArrayLayer = 0,
+		.layerCount     = 1
+	};
+
+	if (newLayout == VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL) {
+
+		imageMemoryBarrier.subresourceRange.aspectMask = VK_IMAGE_ASPECT_DEPTH_BIT;
+
+		if (hasStencilComponent(format)) {
+			imageMemoryBarrier.subresourceRange.aspectMask |= VK_IMAGE_ASPECT_STENCIL_BIT;
+		}
+
+	} else {
+		imageMemoryBarrier.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+	}
+
+	// vkCmdPipelineBarrier(...);
+
+	endCommandRecording(commandBuffer);
+
+	submitCommandBuffer(commandPool, commandBuffer, graphicsQueue);
 }
 
 VkImage createDepthBuffer() {
@@ -836,6 +920,8 @@ void cleanup() {
 		vkDestroyImageView(logicalDevice, imageView, nullptr);
 	}
 
+	vkDestroyCommandPool(logicalDevice, commandPool, nullptr);
+
 	vkDestroySwapchainKHR(logicalDevice, swapchain, nullptr);
 
 	vkDestroySurfaceKHR(instance, surface, nullptr);
@@ -869,6 +955,8 @@ int main(int argc, char *argv[]) {
 
 	swapchain = createSwapchain();
 	swapchainImageViews = createImageViews();
+
+	commandPool = createCommandPool(graphicsFamilyIndex);
 
 	depthBuffer = createDepthBuffer();
 
