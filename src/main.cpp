@@ -1,5 +1,6 @@
 #include <algorithm>
 #include <cstdio>
+#include <fstream>
 #include <vector>
 
 #if !defined(USE_NULLWS)
@@ -874,7 +875,51 @@ void transitionImageLayout(VkImage image, VkFormat format, VkImageLayout oldLayo
 		imageMemoryBarrier.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
 	}
 
-	// vkCmdPipelineBarrier(...);
+	VkPipelineStageFlags srcStageFlags, dstStageFlags;
+
+	if (oldLayout == VK_IMAGE_LAYOUT_UNDEFINED && newLayout == VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL) {
+
+		imageMemoryBarrier.srcAccessMask = 0;
+		imageMemoryBarrier.dstAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
+
+		srcStageFlags = VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT;
+		dstStageFlags = VK_PIPELINE_STAGE_TRANSFER_BIT;
+
+	} else if (oldLayout == VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL && newLayout == VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL) {
+
+		imageMemoryBarrier.srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
+		imageMemoryBarrier.dstAccessMask = VK_ACCESS_SHADER_READ_BIT;
+
+		srcStageFlags = VK_PIPELINE_STAGE_TRANSFER_BIT;
+		dstStageFlags = VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT;
+
+	} else if (oldLayout == VK_IMAGE_LAYOUT_UNDEFINED && newLayout == VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL) {
+
+		imageMemoryBarrier.srcAccessMask = 0;
+		imageMemoryBarrier.dstAccessMask = VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_READ_BIT | VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT;
+
+		srcStageFlags = VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT;
+		dstStageFlags = VK_PIPELINE_STAGE_EARLY_FRAGMENT_TESTS_BIT;
+
+	} else {
+
+		fprintf(stderr, "Unsupported layout transition: 0x%x to 0x%x\n", oldLayout, newLayout);
+		exit(EXIT_FAILURE);
+	
+	}
+
+	vkCmdPipelineBarrier(
+			commandBuffer,
+			srcStageFlags,
+			dstStageFlags,
+			0,				// dependency flags
+			0,				// memory barrier count
+			nullptr,		// memory barriers
+			0,				// buffer memory barrier count
+			nullptr,		// buffer memory barriers
+			1,				// image memory barrier count
+			&imageMemoryBarrier
+		);
 
 	endCommandRecording(commandBuffer);
 
@@ -895,9 +940,44 @@ VkImage createDepthBuffer() {
 
 	vkBindImageMemory(logicalDevice, depthBuffer, depthBufferMemory, 0);
 
-	createImageView(depthBuffer, depthFormat, VK_IMAGE_ASPECT_DEPTH_BIT);
+	depthBufferView = createImageView(depthBuffer, depthFormat, VK_IMAGE_ASPECT_DEPTH_BIT);
+
+	// TODO : segfaults here
+	// transitionImageLayout(depthBuffer, depthFormat, VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL);
 
 	return depthBuffer;
+}
+
+VkShaderModule createShaderModule(const std::string filename) {
+
+	std::ifstream file(filename);
+
+	if (!file.is_open()) {
+		fprintf(stderr, "Could not open file %s\n", filename.c_str());
+		return nullptr;
+	}
+
+	file.seekg(0, std::ios::end);
+	size_t length = file.tellg();
+
+	file.seekg(0);
+
+	std::string source(length, '\0');
+	file.read(source.data(), length);
+
+	VkShaderModuleCreateInfo shaderModuleCI = {};
+	shaderModuleCI.sType = VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO;
+	shaderModuleCI.codeSize = source.length();
+	shaderModuleCI.pCode = reinterpret_cast<const uint32_t *>(source.data());
+
+	VkShaderModule shaderModule;
+
+	if (vkCreateShaderModule(logicalDevice, &shaderModuleCI, nullptr, &shaderModule) != VK_SUCCESS) {
+		fprintf(stderr, "Could not create shader module for %s\n", filename.c_str());
+		exit(EXIT_FAILURE);
+	}
+
+	return shaderModule;
 }
 
 void loop() {
