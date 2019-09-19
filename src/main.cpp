@@ -29,8 +29,13 @@ VkExtent2D swapchainExtent;
 VkSurfaceFormatKHR swapchainFormat;
 VkPresentModeKHR swapchainPresentMode;
 std::vector<VkImageView> swapchainImageViews;
+std::vector<VkFramebuffer> swapchainFramebuffers;
+
+VkRenderPass renderpass;
 
 VkCommandPool commandPool;
+
+VkPipeline graphicsPipeline;
 
 VkImage depthBuffer;
 VkDeviceMemory depthBufferMemory;
@@ -665,7 +670,7 @@ VkImageView createImageView(VkImage image, VkFormat format, VkImageAspectFlags a
 	return imageView;
 }
 
-std::vector<VkImageView> createImageViews() {
+std::vector<VkImageView> createSwapchainImageViews() {
 	
 	uint32_t swapchainImageCount;
 	vkGetSwapchainImagesKHR(logicalDevice, swapchain, &swapchainImageCount, nullptr);
@@ -797,7 +802,6 @@ VkCommandPool createCommandPool(uint32_t queueFamilyIndex) {
 
 }
 
-// TODO : initialise command pool
 VkCommandBuffer beginCommandRecording(VkCommandPool commandPool) {
 
 	VkCommandBuffer commandBuffer;
@@ -815,6 +819,8 @@ VkCommandBuffer beginCommandRecording(VkCommandPool commandPool) {
 	commandBufferBI.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
 
 	vkBeginCommandBuffer(commandBuffer, &commandBufferBI);
+
+	return commandBuffer;
 
 }
 
@@ -942,10 +948,110 @@ VkImage createDepthBuffer() {
 
 	depthBufferView = createImageView(depthBuffer, depthFormat, VK_IMAGE_ASPECT_DEPTH_BIT);
 
-	// TODO : segfaults here
-	// transitionImageLayout(depthBuffer, depthFormat, VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL);
+	transitionImageLayout(depthBuffer, depthFormat, VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL);
 
 	return depthBuffer;
+}
+
+VkRenderPass createRenderPass() {
+
+	VkAttachmentDescription colorAttachment = {};
+	colorAttachment.format         = swapchainFormat.format;
+	colorAttachment.samples        = VK_SAMPLE_COUNT_1_BIT;	// TODO : multisampling
+	colorAttachment.loadOp         = VK_ATTACHMENT_LOAD_OP_CLEAR;
+	colorAttachment.storeOp        = VK_ATTACHMENT_STORE_OP_STORE;
+	colorAttachment.stencilLoadOp  = VK_ATTACHMENT_LOAD_OP_DONT_CARE;
+	colorAttachment.stencilStoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
+	colorAttachment.initialLayout  = VK_IMAGE_LAYOUT_UNDEFINED;
+	colorAttachment.finalLayout    = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR;
+
+	VkAttachmentReference colorAttachmentReference = {};
+	colorAttachmentReference.attachment = 0;
+	colorAttachmentReference.layout     = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
+
+	VkAttachmentDescription depthAttachment = {};
+	depthAttachment.format         = selectDepthFormat(physicalDevice);
+	depthAttachment.samples        = VK_SAMPLE_COUNT_1_BIT;	// TODO : multisampling
+	depthAttachment.loadOp         = VK_ATTACHMENT_LOAD_OP_CLEAR;
+	depthAttachment.storeOp        = VK_ATTACHMENT_STORE_OP_DONT_CARE;
+	depthAttachment.stencilLoadOp  = VK_ATTACHMENT_LOAD_OP_DONT_CARE;
+	depthAttachment.stencilStoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
+	depthAttachment.initialLayout  = VK_IMAGE_LAYOUT_UNDEFINED;
+	depthAttachment.finalLayout    = VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL;
+
+	VkAttachmentReference depthAttachmentReference = {};
+	depthAttachmentReference.attachment = 1;
+	depthAttachmentReference.layout     = VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL;
+
+	std::array<VkAttachmentDescription, 2> attachments = {
+		colorAttachment, depthAttachment
+	};
+
+	VkSubpassDescription subpassDescription = {};
+	subpassDescription.pipelineBindPoint       = VK_PIPELINE_BIND_POINT_GRAPHICS;
+	subpassDescription.colorAttachmentCount    = 1;
+	subpassDescription.pColorAttachments       = &colorAttachmentReference;
+	subpassDescription.pDepthStencilAttachment = &depthAttachmentReference;
+
+	VkSubpassDependency subpassDependency = {};
+	subpassDependency.srcSubpass = VK_SUBPASS_EXTERNAL;
+	subpassDependency.dstSubpass = 0;
+	subpassDependency.srcStageMask = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
+	subpassDependency.dstStageMask = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
+	subpassDependency.srcAccessMask = 0;
+	subpassDependency.dstAccessMask = VK_ACCESS_COLOR_ATTACHMENT_READ_BIT | VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT;
+	subpassDependency.dependencyFlags = 0;
+
+	VkRenderPassCreateInfo renderpassCI = {};
+	renderpassCI.sType = VK_STRUCTURE_TYPE_RENDER_PASS_CREATE_INFO;
+	renderpassCI.attachmentCount = static_cast<uint32_t>(attachments.size());
+	renderpassCI.pAttachments = attachments.data();
+	renderpassCI.subpassCount = 1;
+	renderpassCI.pSubpasses = &subpassDescription;
+	renderpassCI.dependencyCount = 1;
+	renderpassCI.pDependencies = &subpassDependency;
+
+	VkRenderPass renderpass;
+
+	if (vkCreateRenderPass(logicalDevice, &renderpassCI, nullptr, &renderpass) != VK_SUCCESS) {
+		fputs("Unable to create render pass\n", stderr);
+		exit(EXIT_FAILURE);
+	}
+
+	return renderpass;
+
+}
+
+std::vector<VkFramebuffer> createFramebuffers() {
+
+	std::vector<VkFramebuffer> swapchainFramebuffers(swapchainImageViews.size());
+
+	for (uint32_t i = 0; i < swapchainFramebuffers.size(); i++) {
+
+		std::array<VkImageView, 2> framebufferAttachments = {
+			swapchainImageViews[i], depthBufferView
+		};
+
+		VkFramebufferCreateInfo framebufferCI = {};
+		framebufferCI.sType = VK_STRUCTURE_TYPE_FRAMEBUFFER_CREATE_INFO;
+		framebufferCI.renderPass = renderpass;
+		framebufferCI.attachmentCount = static_cast<uint32_t>(framebufferAttachments.size());
+		framebufferCI.pAttachments = framebufferAttachments.data();
+		framebufferCI.width = swapchainExtent.width;
+		framebufferCI.height = swapchainExtent.height;
+		framebufferCI.layers = 1;
+
+		VkFramebuffer framebuffer;
+
+		if (vkCreateFramebuffer(logicalDevice, &framebufferCI, nullptr, &framebuffer) != VK_SUCCESS) {
+			fputs("Unable to create framebuffer\n", stderr);
+			exit(EXIT_FAILURE);
+		}
+
+	}
+
+	return swapchainFramebuffers;
+
 }
 
 VkShaderModule createShaderModule(const std::string filename) {
@@ -980,6 +1086,58 @@ VkShaderModule createShaderModule(const std::string filename) {
 	return shaderModule;
 }
 
+// TODO : overloads for different e.g. geometry, etc. shaders?
+VkPipeline createGraphicsPipeline(const std::string vertexShaderPath, const std::string fragmentShaderPath) {
+
+	VkShaderModule vertexShaderModule = createShaderModule(vertexShaderPath);
+	VkShaderModule fragmentShaderModule = createShaderModule(fragmentShaderPath);
+
+	VkPipelineShaderStageCreateInfo vertShaderStageCI = {};
+	vertShaderStageCI.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
+	vertShaderStageCI.stage = VK_SHADER_STAGE_VERTEX_BIT;
+	vertShaderStageCI.module = vertexShaderModule;
+	vertShaderStageCI.pName = "main";
+
+	VkPipelineShaderStageCreateInfo fragShaderStageCI = {};
+	fragShaderStageCI.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
+	fragShaderStageCI.stage = VK_SHADER_STAGE_FRAGMENT_BIT;
+	fragShaderStageCI.module = fragmentShaderModule;
+	fragShaderStageCI.pName = "main";
+
+	VkPipelineShaderStageCreateInfo shaderStages[] = {
+		vertShaderStageCI, fragShaderStageCI  
+	};
+
+	VkVertexInputBindingDescription vertexInputBindingDescription = getBindingDescription();
+	
+	VkPipelineVertexInputStateCreateInfo vertexInputStateCI = {};
+	vertexInputStateCI.sType = VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO;
+	vertexInputStateCI.vertexBindingDescriptionCount = 1;
+	vertexInputStateCI.pVertexBindingDescriptions = &vertexInputBindingDescription;
+	vertexInputStateCI.vertexBindingDescriptionCount = 1;
+	vertexInputStateCI.vertexBindingDescriptionCount = 1;
+
+	VkGraphicsPipelineCreateInfo graphicsPipelineCI = {};
+	graphicsPipelineCI.sType = VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO;
+	graphicsPipelineCI.stageCount = 2;
+	graphicsPipelineCI.pStages = shaderStages;
+	graphicsPipelineCI.pVertexInputState = 
+// 	graphicsPipelineCI.sType = VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO;
+// 	graphicsPipelineCI.sType = VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO;
+// 	graphicsPipelineCI.sType = VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO;
+// 	graphicsPipelineCI.sType = VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO;
+
+	VkPipeline graphicsPipeline;
+
+	if (vkCreateGraphicsPipelines(logicalDevice, VK_NULL_HANDLE, 1, &graphicsPipelineCI, nullptr, &graphicsPipeline) != VK_SUCCESS) {
+		fputs("Could not create graphics pipeline\n", stderr);
+		exit(EXIT_FAILURE);
+	}
+
+	return graphicsPipeline;
+
+}
+
 void loop() {
 #if defined(USE_NULLWS)
 	while (1)
@@ -995,6 +1153,8 @@ void loop() {
 void cleanup() {
 
 	vkDeviceWaitIdle(logicalDevice);
+
+	// vkDestroyShaderModule(logicalDevice, 
 
 	for (VkImageView imageView : swapchainImageViews) {
 		vkDestroyImageView(logicalDevice, imageView, nullptr);
@@ -1034,11 +1194,17 @@ int main(int argc, char *argv[]) {
 	logicalDevice = createLogicalDevice(deviceExtensions);
 
 	swapchain = createSwapchain();
-	swapchainImageViews = createImageViews();
+	swapchainImageViews = createSwapchainImageViews();
+
+	renderpass = createRenderPass();
+
+	graphicsPipeline = createGraphicsPipeline("spirv/test.vert", "spirv/test.frag");
 
 	commandPool = createCommandPool(graphicsFamilyIndex);
 
 	depthBuffer = createDepthBuffer();
+	
+	swapchainFramebuffers = createFramebuffers();
 
 	loop();
 

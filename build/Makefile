@@ -4,15 +4,19 @@ SRC = ../src
 INC = ../include
 SHADERDIR = ../shaders
 OBJ = obj
+SPIRVDIR = spirv
 
-CFLAGS = -g -std=c++17 -I${VULKAN_SDK}/include -I$(INC)
+CFLAGS = -g -std=c++17 -Wall -I${VULKAN_SDK}/include -I$(INC)
 LDFLAGS = -lvulkan
 
 _OBJS = $(wildcard $(SRC)/*.cpp)
 OBJS = $(patsubst $(SRC)/%.cpp,$(OBJ)/%.o,$(_OBJS))
 
-SHADERS = $(wildcard $(SHADERDIR)/*.vert)
-SHADERS += $(wildcard $(SHADERDIR)/*.frag)
+SHADERS = $(wildcard $(SHADERDIR)/*.*)
+
+SPV = $(patsubst $(SHADERDIR)/%,$(SPIRVDIR)/%,$(SHADERS))
+
+GLSLANG = glslangValidator
 
 BIN = spock
 
@@ -28,13 +32,18 @@ endif
 
 .PHONY: run clean nuke
 
+# compile GLSL shaders to SPIR-V
+$(SPIRVDIR)/%: $(SHADERDIR)/%
+	@mkdir -p $(SPIRVDIR)
+	$(GLSLANG) -s -V $< -o $@
+
+# compile regular cpp files
 $(OBJ)/%.o: $(SRC)/%.cpp
 	@mkdir -p $(OBJ)
 	$(CXX) $(CFLAGS) -c $< -o $@ $(LDFLAGS)
 
-$(BIN): $(OBJS) $(SHADERS)
-	#@echo "Compiling shaders"
-	#@cd $(SHADERDIR) && ./compile.sh
+# compile final executable
+$(BIN): $(OBJS) $(SPV)
 	$(CXX) $(CFLAGS) $(DIRECTIVES) -o $@ $(OBJS) $(LDFLAGS) 
 
 run: $(BIN)
@@ -44,4 +53,4 @@ clean:
 	rm -rf $(OBJ)
 
 nuke:
-	rm -rf $(OBJ) $(BIN)
+	rm -rf $(OBJ) $(SPIRVDIR) $(BIN) 
