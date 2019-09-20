@@ -10,6 +10,8 @@
 
 #include <vulkan/vulkan.hpp>
 
+#include "vertex.h"
+
 bool validationEnabled = true;
 
 /* global variables (to be put as class members) */
@@ -994,22 +996,22 @@ VkRenderPass createRenderPass() {
 	subpassDescription.pDepthStencilAttachment = &depthAttachmentReference;
 
 	VkSubpassDependency subpassDependency = {};
-	subpassDependency.srcSubpass = VK_SUBPASS_EXTERNAL;
-	subpassDependency.dstSubpass = 0;
-	subpassDependency.srcStageMask = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
-	subpassDependency.dstStageMask = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
-	subpassDependency.srcAccessMask = 0;
-	subpassDependency.dstAccessMask = VK_ACCESS_COLOR_ATTACHMENT_READ_BIT | VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT;
+	subpassDependency.srcSubpass      = VK_SUBPASS_EXTERNAL;
+	subpassDependency.dstSubpass      = 0;
+	subpassDependency.srcStageMask    = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
+	subpassDependency.dstStageMask    = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
+	subpassDependency.srcAccessMask   = 0;
+	subpassDependency.dstAccessMask   = VK_ACCESS_COLOR_ATTACHMENT_READ_BIT | VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT;
 	subpassDependency.dependencyFlags = 0;
 
 	VkRenderPassCreateInfo renderpassCI = {};
-	renderpassCI.sType = VK_STRUCTURE_TYPE_RENDER_PASS_CREATE_INFO;
+	renderpassCI.sType           = VK_STRUCTURE_TYPE_RENDER_PASS_CREATE_INFO;
 	renderpassCI.attachmentCount = static_cast<uint32_t>(attachments.size());
-	renderpassCI.pAttachments = attachments.data();
-	renderpassCI.subpassCount = 1;
-	renderpassCI.pSubpasses = &subpassDescription;
+	renderpassCI.pAttachments    = attachments.data();
+	renderpassCI.subpassCount    = 1;
+	renderpassCI.pSubpasses      = &subpassDescription;
 	renderpassCI.dependencyCount = 1;
-	renderpassCI.pDependencies = &subpassDependency;
+	renderpassCI.pDependencies   = &subpassDependency;
 
 	VkRenderPass renderpass;
 
@@ -1105,23 +1107,24 @@ VkPipeline createGraphicsPipeline(const std::string vertexShaderPath, const std:
 	fragShaderStageCI.pName = "main";
 
 	VkPipelineShaderStageCreateInfo shaderStages[] = {
-		vertShaderStageCI, fragShaderStageCI  
+		vertShaderStageCI, fragShaderStageCI
 	};
 
-	VkVertexInputBindingDescription vertexInputBindingDescription = getBindingDescription();
+	VkVertexInputBindingDescription vertexInputBindingDescription = Vertex::getInputBindingDescription();
+	std::array<VkVertexInputAttributeDescription, Vertex::attributeCount> vertexInputAttributeDescriptions = Vertex::getAttributeDescriptions();
 	
 	VkPipelineVertexInputStateCreateInfo vertexInputStateCI = {};
-	vertexInputStateCI.sType = VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO;
-	vertexInputStateCI.vertexBindingDescriptionCount = 1;
-	vertexInputStateCI.pVertexBindingDescriptions = &vertexInputBindingDescription;
-	vertexInputStateCI.vertexBindingDescriptionCount = 1;
-	vertexInputStateCI.vertexBindingDescriptionCount = 1;
+	vertexInputStateCI.sType                           = VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO;
+	vertexInputStateCI.vertexBindingDescriptionCount   = 1;
+	vertexInputStateCI.pVertexBindingDescriptions      = &vertexInputBindingDescription;
+	vertexInputStateCI.vertexAttributeDescriptionCount = static_cast<uint32_t>(vertexInputAttributeDescriptions.size());
+	vertexInputStateCI.pVertexAttributeDescriptions    = vertexInputAttributeDescriptions.data();
 
 	VkGraphicsPipelineCreateInfo graphicsPipelineCI = {};
 	graphicsPipelineCI.sType = VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO;
 	graphicsPipelineCI.stageCount = 2;
 	graphicsPipelineCI.pStages = shaderStages;
-	graphicsPipelineCI.pVertexInputState = 
+// 	graphicsPipelineCI.pVertexInputState = 
 // 	graphicsPipelineCI.sType = VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO;
 // 	graphicsPipelineCI.sType = VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO;
 // 	graphicsPipelineCI.sType = VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO;
@@ -1203,7 +1206,7 @@ int main(int argc, char *argv[]) {
 	commandPool = createCommandPool(graphicsFamilyIndex);
 
 	depthBuffer = createDepthBuffer();
-	
+
 	swapchainFramebuffers = createFramebuffers();
 
 	loop();
