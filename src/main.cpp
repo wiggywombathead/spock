@@ -1035,13 +1035,13 @@ std::vector<VkFramebuffer> createFramebuffers() {
 		};
 
 		VkFramebufferCreateInfo framebufferCI = {};
-		framebufferCI.sType = VK_STRUCTURE_TYPE_FRAMEBUFFER_CREATE_INFO;
-		framebufferCI.renderPass = renderpass;
+		framebufferCI.sType           = VK_STRUCTURE_TYPE_FRAMEBUFFER_CREATE_INFO;
+		framebufferCI.renderPass      = renderpass;
 		framebufferCI.attachmentCount = static_cast<uint32_t>(framebufferAttachments.size());
-		framebufferCI.pAttachments = framebufferAttachments.data();
-		framebufferCI.width = swapchainExtent.width;
-		framebufferCI.height = swapchainExtent.height;
-		framebufferCI.layers = 1;
+		framebufferCI.pAttachments    = framebufferAttachments.data();
+		framebufferCI.width           = swapchainExtent.width;
+		framebufferCI.height          = swapchainExtent.height;
+		framebufferCI.layers          = 1;
 
 		VkFramebuffer framebuffer;
 
@@ -1074,9 +1074,9 @@ VkShaderModule createShaderModule(const std::string filename) {
 	file.read(source.data(), length);
 
 	VkShaderModuleCreateInfo shaderModuleCI = {};
-	shaderModuleCI.sType = VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO;
+	shaderModuleCI.sType    = VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO;
 	shaderModuleCI.codeSize = source.length();
-	shaderModuleCI.pCode = reinterpret_cast<const uint32_t *>(source.data());
+	shaderModuleCI.pCode    = reinterpret_cast<const uint32_t *>(source.data());
 
 	VkShaderModule shaderModule;
 
@@ -1084,6 +1084,8 @@ VkShaderModule createShaderModule(const std::string filename) {
 		fprintf(stderr, "Could not create shader module for %s\n", filename.c_str());
 		exit(EXIT_FAILURE);
 	}
+
+	file.close();
 
 	return shaderModule;
 }
@@ -1120,22 +1122,83 @@ VkPipeline createGraphicsPipeline(const std::string vertexShaderPath, const std:
 	vertexInputStateCI.vertexAttributeDescriptionCount = static_cast<uint32_t>(vertexInputAttributeDescriptions.size());
 	vertexInputStateCI.pVertexAttributeDescriptions    = vertexInputAttributeDescriptions.data();
 
+	VkPipelineInputAssemblyStateCreateInfo inputAssemblyStateCI = {};
+	inputAssemblyStateCI.sType                  = VK_STRUCTURE_TYPE_PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO;
+	inputAssemblyStateCI.topology               = VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST;
+	inputAssemblyStateCI.primitiveRestartEnable = VK_FALSE;
+
+	VkViewport viewport = {};
+	viewport.x        = 0.0f;
+	viewport.y        = 0.0f;
+	viewport.width    = swapchainExtent.width;
+	viewport.height   = swapchainExtent.height;
+	viewport.minDepth = 0.0f;
+	viewport.maxDepth = 1.0f;
+
+	VkRect2D scissor = {};
+	scissor.offset = {0, 0};
+	scissor.extent = swapchainExtent;
+
+	VkPipelineViewportStateCreateInfo viewportStateCI = {};
+	viewportStateCI.sType         = VK_STRUCTURE_TYPE_PIPELINE_VIEWPORT_STATE_CREATE_INFO;
+	viewportStateCI.viewportCount = 1;
+	viewportStateCI.pViewports    = &viewport;
+	viewportStateCI.scissorCount  = 1;
+	viewportStateCI.pScissors     = &scissor;
+
+	VkPipelineRasterizationStateCreateInfo rasterizationStateCI = {};
+	rasterizationStateCI.sType                   = VK_STRUCTURE_TYPE_PIPELINE_RASTERIZATION_STATE_CREATE_INFO;
+	rasterizationStateCI.depthClampEnable        = VK_FALSE;
+	rasterizationStateCI.rasterizerDiscardEnable = VK_TRUE;
+	rasterizationStateCI.polygonMode             = VK_POLYGON_MODE_FILL;
+	rasterizationStateCI.cullMode                = VK_CULL_MODE_BACK_BIT;
+	rasterizationStateCI.frontFace               = VK_FRONT_FACE_COUNTER_CLOCKWISE;
+	rasterizationStateCI.depthBiasEnable         = VK_FALSE;
+	rasterizationStateCI.lineWidth               = 1.0f;
+
+	// TODO : getect multisampling support and implement
+	VkPipelineMultisampleStateCreateInfo multisampleStateCI = {};
+	multisampleStateCI.sType                = VK_STRUCTURE_TYPE_PIPELINE_MULTISAMPLE_STATE_CREATE_INFO;
+	multisampleStateCI.rasterizationSamples = VK_SAMPLE_COUNT_1_BIT;
+	multisampleStateCI.sampleShadingEnable  = VK_FALSE;
+	multisampleStateCI.minSampleShading     = 1.0f;
+
+	VkPipelineDepthStencilStateCreateInfo depthStencilStateCI = {};
+	depthStencilStateCI.sType = VK_STRUCTURE_TYPE_PIPELINE_DEPTH_STENCIL_STATE_CREATE_INFO;
+	depthStencilStateCI.depthTestEnable = VK_TRUE;
+	depthStencilStateCI.depthWriteEnable = VK_TRUE;
+	depthStencilStateCI.depthCompareOp = VK_COMPARE_OP_LESS;
+	depthStencilStateCI.depthBoundsTestEnable = VK_FALSE;
+	depthStencilStateCI.stencilTestEnable = VK_FALSE;
+	depthStencilStateCI.minDepthBounds = 0.0f;
+	depthStencilStateCI.maxDepthBounds = 1.0f;
+
+	VkPipelineColorBlendStateCreateInfo colorBlendStateCI = {};
+
+	VkPipelineLayout pipelineLayout = {};
+
 	VkGraphicsPipelineCreateInfo graphicsPipelineCI = {};
 	graphicsPipelineCI.sType = VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO;
 	graphicsPipelineCI.stageCount = 2;
 	graphicsPipelineCI.pStages = shaderStages;
-// 	graphicsPipelineCI.pVertexInputState = 
-// 	graphicsPipelineCI.sType = VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO;
-// 	graphicsPipelineCI.sType = VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO;
-// 	graphicsPipelineCI.sType = VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO;
-// 	graphicsPipelineCI.sType = VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO;
+	graphicsPipelineCI.pVertexInputState = &vertexInputStateCI;
+	graphicsPipelineCI.pInputAssemblyState = &inputAssemblyStateCI;
+	graphicsPipelineCI.pViewportState = &viewportStateCI;
+	graphicsPipelineCI.pRasterizationState = &rasterizationStateCI;
+	graphicsPipelineCI.pMultisampleState = &multisampleStateCI;
+	graphicsPipelineCI.pDepthStencilState = &depthStencilStateCI;
+	graphicsPipelineCI.pColorBlendState = &colorBlendStateCI;
+	graphicsPipelineCI.layout = pipelineLayout;
+	graphicsPipelineCI.renderPass = renderpass;
 
 	VkPipeline graphicsPipeline;
 
+	/*
 	if (vkCreateGraphicsPipelines(logicalDevice, VK_NULL_HANDLE, 1, &graphicsPipelineCI, nullptr, &graphicsPipeline) != VK_SUCCESS) {
 		fputs("Could not create graphics pipeline\n", stderr);
 		exit(EXIT_FAILURE);
 	}
+	*/
 
 	return graphicsPipeline;
 
@@ -1206,7 +1269,6 @@ int main(int argc, char *argv[]) {
 	commandPool = createCommandPool(graphicsFamilyIndex);
 
 	depthBuffer = createDepthBuffer();
-
 	swapchainFramebuffers = createFramebuffers();
 
 	loop();
