@@ -7,7 +7,7 @@ OBJ = obj
 SPIRVDIR = spirv
 
 CFLAGS = -g -std=c++17 -Wall -I${VULKAN_SDK}/include -I$(INC)
-LDFLAGS = -lvulkan
+LDFLAGS = -L${VULKAN_SDK}/lib -lvulkan
 
 _OBJS = $(wildcard $(SRC)/*.cpp)
 OBJS = $(patsubst $(SRC)/%.cpp,$(OBJ)/%.o,$(_OBJS))
