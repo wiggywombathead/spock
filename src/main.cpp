@@ -35,9 +35,11 @@ std::vector<VkFramebuffer> swapchainFramebuffers;
 
 VkRenderPass renderpass;
 
-VkCommandPool commandPool;
-
+VkPipelineLayout pipelineLayout;
 VkPipeline graphicsPipeline;
+
+VkCommandPool commandPool;
+std::vector<VkCommandBuffer> commandBuffers;
 
 VkImage depthBuffer;
 VkDeviceMemory depthBufferMemory;
@@ -801,8 +803,78 @@ VkCommandPool createCommandPool(uint32_t queueFamilyIndex) {
 	}
 
 	return commandPool;
-
 }
+
+std::vector<VkCommandBuffer> createCommandBuffers(VkCommandPool commandPool) {
+
+	std::vector<VkCommandBuffer> commandBuffers(swapchainFramebuffers.size());
+
+	VkCommandBufferAllocateInfo commandBufferAI = {};
+	commandBufferAI.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
+	commandBufferAI.commandPool = commandPool;
+	commandBufferAI.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
+	commandBufferAI.commandBufferCount = static_cast<uint32_t>(commandBuffers.size());
+
+	if (vkAllocateCommandBuffers(logicalDevice, &commandBufferAI, commandBuffers.data()) != VK_SUCCESS) {
+		fputs("Failed to allocate command buffers\n", stderr);
+		exit(EXIT_FAILURE);
+	}
+
+	return commandBuffers;
+}
+
+void recordRenderpasses() {
+
+	for (uint32_t i = 0; i < commandBuffers.size(); i++) {
+
+		VkCommandBufferBeginInfo commandBufferBI = {};
+		commandBufferBI.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
+		commandBufferBI.flags = VK_COMMAND_BUFFER_USAGE_SIMULTANEOUS_USE_BIT;
+
+		if (vkBeginCommandBuffer(commandBuffers[i], &commandBufferBI) != VK_SUCCESS) {
+			fputs("Unable to begin command buffer\n", stderr);
+		}
+
+		std::array<VkClearValue, 2> clearColors = {};
+		clearColors[0].color = { 0.3f, 0.3f, 0.3f, 1.0f };
+		clearColors[1].depthStencil = { 1.0f, 0.0f };
+
+		VkRenderPassBeginInfo renderpassBI = {};
+		renderpassBI.sType = VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO;
+		renderpassBI.renderpass = renderpass;
+		renderpassBI.framebuffer = swapchainFramebuffers[i];
+		renderpassBI.renderArea.offset = { 0, 0 };
+		renderpassBI.renderArea.extent = swapchainExtent;
+		renderpassBI.clearValueCount = static_cast<uint32_t>(clearColors.size());
+		renderpassBI.pClearValues = clearColors.data();
+
+		// start of renderpass
+		vkCmdBeginRenderPass(commandBuffers[i], &renderpassBI, VK_SUBPASS_CONTENTS_INLINE);
+			
+			vkCmdBindPipeline(commandBuffers[i], VK_PIPELINE_BIND_POINT_GRAPHICS, graphicsPipeline);
+			// TODO: create descriptor sets
+			vkCmdBindDescriptorSets(
+					commandBuffers[i],
+					VK_PIPELINE_BIND_POINT_GRAPHICS,
+					pipelineLayout,
+					0,
+					1,
+					&descriptorSets[i],
+					0,
+					nullptr
+				);
+
+		vkCmdEndRenderPass(commandBuffers[i]);
+
+		if (vkEndCommandBuffer(commandBuffers[i]) != VK_SUCCESS) {
+			fputs("Failed to end command buffer\n", stderr);
+			exit(EXIT_FAILURE);
+		}
+
+	}
+	
+}
+
 
 VkCommandBuffer beginCommandRecording(VkCommandPool commandPool) {
 
@@ -823,7 +895,6 @@ VkCommandBuffer beginCommandRecording(VkCommandPool commandPool) {
 	vkBeginCommandBuffer(commandBuffer, &commandBufferBI);
 
 	return commandBuffer;
-
 }
 
 void submitCommandBuffer(VkCommandPool commandPool, VkCommandBuffer commandBuffer, VkQueue queue) {
@@ -1021,7 +1092,6 @@ VkRenderPass createRenderPass() {
 	}
 
 	return renderpass;
-
 }
 
 std::vector<VkFramebuffer> createFramebuffers() {
@@ -1053,7 +1123,6 @@ std::vector<VkFramebuffer> createFramebuffers() {
 	}
 
 	return swapchainFramebuffers;
-
 }
 
 VkShaderModule createShaderModule(const std::string filename) {
@@ -1156,7 +1225,7 @@ VkPipeline createGraphicsPipeline(const std::string vertexShaderPath, const std:
 	rasterizationStateCI.depthBiasEnable         = VK_FALSE;
 	rasterizationStateCI.lineWidth               = 1.0f;
 
-	// TODO : getect multisampling support and implement
+	// TODO : detect multisampling support and implement
 	VkPipelineMultisampleStateCreateInfo multisampleStateCI = {};
 	multisampleStateCI.sType                = VK_STRUCTURE_TYPE_PIPELINE_MULTISAMPLE_STATE_CREATE_INFO;
 	multisampleStateCI.rasterizationSamples = VK_SAMPLE_COUNT_1_BIT;
@@ -1164,44 +1233,62 @@ VkPipeline createGraphicsPipeline(const std::string vertexShaderPath, const std:
 	multisampleStateCI.minSampleShading     = 1.0f;
 
 	VkPipelineDepthStencilStateCreateInfo depthStencilStateCI = {};
-	depthStencilStateCI.sType = VK_STRUCTURE_TYPE_PIPELINE_DEPTH_STENCIL_STATE_CREATE_INFO;
-	depthStencilStateCI.depthTestEnable = VK_TRUE;
-	depthStencilStateCI.depthWriteEnable = VK_TRUE;
-	depthStencilStateCI.depthCompareOp = VK_COMPARE_OP_LESS;
+	depthStencilStateCI.sType                 = VK_STRUCTURE_TYPE_PIPELINE_DEPTH_STENCIL_STATE_CREATE_INFO;
+	depthStencilStateCI.depthTestEnable       = VK_TRUE;
+	depthStencilStateCI.depthWriteEnable      = VK_TRUE;
+	depthStencilStateCI.depthCompareOp        = VK_COMPARE_OP_LESS;
 	depthStencilStateCI.depthBoundsTestEnable = VK_FALSE;
-	depthStencilStateCI.stencilTestEnable = VK_FALSE;
-	depthStencilStateCI.minDepthBounds = 0.0f;
-	depthStencilStateCI.maxDepthBounds = 1.0f;
+	depthStencilStateCI.stencilTestEnable     = VK_FALSE;
+	depthStencilStateCI.minDepthBounds        = 0.0f;
+	depthStencilStateCI.maxDepthBounds        = 1.0f;
+
+	VkPipelineColorBlendAttachmentState colorBlendAttachment = {};
+	colorBlendAttachment.colorWriteMask = VK_COLOR_COMPONENT_R_BIT | VK_COLOR_COMPONENT_G_BIT | VK_COLOR_COMPONENT_B_BIT | VK_COLOR_COMPONENT_A_BIT;
+	colorBlendAttachment.blendEnable = VK_FALSE;
 
 	VkPipelineColorBlendStateCreateInfo colorBlendStateCI = {};
+	colorBlendStateCI.sType = VK_STRUCTURE_TYPE_PIPELINE_COLOR_BLEND_STATE_CREATE_INFO;
+	colorBlendStateCI.logicOpEnable = VK_FALSE;
+	colorBlendStateCI.logicOp = VK_LOGIC_OP_COPY;
+	colorBlendStateCI.attachmentCount = 1;
+	colorBlendStateCI.pAttachments = &colorBlendAttachment;
+	colorBlendStateCI.blendConstants[0] = 0.0f;
+	colorBlendStateCI.blendConstants[1] = 0.0f;
+	colorBlendStateCI.blendConstants[2] = 0.0f;
+	colorBlendStateCI.blendConstants[3] = 0.0f;
 
-	VkPipelineLayout pipelineLayout = {};
+	VkPipelineLayoutCreateInfo pipelineLayoutCI = {};
+	pipelineLayoutCI.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
+	pipelineLayoutCI.setLayoutCount = 0;
+	pipelineLayoutCI.pushConstantRangeCount = 0;
+
+	if (vkCreatePipelineLayout(logicalDevice, &pipelineLayoutCI, nullptr, &pipelineLayout) != VK_SUCCESS) {
+		fputs("Could not create pipeline layout\n", stderr);
+		exit(EXIT_FAILURE);
+	}
 
 	VkGraphicsPipelineCreateInfo graphicsPipelineCI = {};
-	graphicsPipelineCI.sType = VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO;
-	graphicsPipelineCI.stageCount = 2;
-	graphicsPipelineCI.pStages = shaderStages;
-	graphicsPipelineCI.pVertexInputState = &vertexInputStateCI;
+	graphicsPipelineCI.sType               = VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO;
+	graphicsPipelineCI.stageCount          = 2;
+	graphicsPipelineCI.pStages             = shaderStages;
+	graphicsPipelineCI.pVertexInputState   = &vertexInputStateCI;
 	graphicsPipelineCI.pInputAssemblyState = &inputAssemblyStateCI;
-	graphicsPipelineCI.pViewportState = &viewportStateCI;
+	graphicsPipelineCI.pViewportState      = &viewportStateCI;
 	graphicsPipelineCI.pRasterizationState = &rasterizationStateCI;
-	graphicsPipelineCI.pMultisampleState = &multisampleStateCI;
-	graphicsPipelineCI.pDepthStencilState = &depthStencilStateCI;
-	graphicsPipelineCI.pColorBlendState = &colorBlendStateCI;
-	graphicsPipelineCI.layout = pipelineLayout;
-	graphicsPipelineCI.renderPass = renderpass;
+	graphicsPipelineCI.pMultisampleState   = &multisampleStateCI;
+	graphicsPipelineCI.pDepthStencilState  = &depthStencilStateCI;
+	graphicsPipelineCI.pColorBlendState    = &colorBlendStateCI;
+	graphicsPipelineCI.layout              = pipelineLayout;
+	graphicsPipelineCI.renderPass          = renderpass;
 
 	VkPipeline graphicsPipeline;
 
-	/*
 	if (vkCreateGraphicsPipelines(logicalDevice, VK_NULL_HANDLE, 1, &graphicsPipelineCI, nullptr, &graphicsPipeline) != VK_SUCCESS) {
 		fputs("Could not create graphics pipeline\n", stderr);
 		exit(EXIT_FAILURE);
 	}
-	*/
 
 	return graphicsPipeline;
-
 }
 
 void loop() {
@@ -1268,8 +1355,11 @@ int main(int argc, char *argv[]) {
 
 	commandPool = createCommandPool(graphicsFamilyIndex);
 
-	depthBuffer = createDepthBuffer();
 	swapchainFramebuffers = createFramebuffers();
+
+	depthBuffer = createDepthBuffer();
+
+	commandBuffers = createCommandBuffers(commandPool);
 
 	loop();
 
