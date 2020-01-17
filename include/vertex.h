@@ -1,13 +1,18 @@
 #ifndef _VERTEX_H
 #define _VERTEX_H
 
+#include <array>
 #include <glm/glm.hpp>
 #include <vulkan/vulkan.h>
 
-struct Vertex {
+class Vertex {
+public:
+	Vertex(glm::vec2 position, glm::vec3 color, glm::vec2 texCoord);
+
 	static const uint32_t attributeCount = 3;
 
-	glm::vec3 position;
+	// TODO: change to vec3
+	glm::vec2 position;
 	glm::vec3 color;
 	glm::vec2 texCoord;
 

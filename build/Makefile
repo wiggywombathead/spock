@@ -20,9 +20,9 @@ GLSLANG = glslangValidator
 
 BIN = spock
 
-ifeq ($(BUILD),debug)
-	CFLAGS += -DDEBUG
-endif
+#ifeq ($(BUILD),debug)
+CFLAGS += -DDEBUG
+#endif
 
 ifeq ($(WS),null)
 	CFLAGS += -DUSE_NULLWS

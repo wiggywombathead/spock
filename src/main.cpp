@@ -35,6 +35,14 @@ std::vector<VkFramebuffer> swapchainFramebuffers;
 
 VkRenderPass renderpass;
 
+VkDescriptorSetLayout descriptorSetLayout;
+
+VkBuffer vertexBuffer;
+VkDeviceMemory vertexBufferMemory;
+
+VkBuffer indexBuffer;
+VkDeviceMemory indexBufferMemory;
+
 VkPipelineLayout pipelineLayout;
 VkPipeline graphicsPipeline;
 
@@ -44,6 +52,12 @@ std::vector<VkCommandBuffer> commandBuffers;
 VkImage depthBuffer;
 VkDeviceMemory depthBufferMemory;
 VkImageView depthBufferView;
+
+struct UniformBufferObject {
+	glm::mat4 model;
+	glm::mat4 view;
+	glm::mat4 projection;
+};
 
 #if !defined(USE_NULLWS)
 void keyboard(GLFWwindow *window, int k, int scancode, int action, int mods) {
@@ -55,6 +69,12 @@ void keyboard(GLFWwindow *window, int k, int scancode, int action, int mods) {
 	}
 }
 #endif
+
+const std::vector<Vertex> vertices = {
+    { Vertex({ 0.0f, -0.5f}, {1.0f, 0.0f, 0.0f}, {0.0f, 0.0f}) },
+    { Vertex({ 0.5f,  0.5f}, {0.0f, 1.0f, 0.0f}, {0.0f, 0.0f}) },
+    { Vertex({-0.5f,  0.5f}, {0.0f, 0.0f, 1.0f}, {0.0f, 0.0f}) }
+};
 
 /**
  * prints supported instance layers
@@ -805,6 +825,24 @@ VkCommandPool createCommandPool(uint32_t queueFamilyIndex) {
 	return commandPool;
 }
 
+// TODO: allocate memory for vertex buffer
+
+VkBuffer createVertexBuffer() {
+
+	VkBufferCreateInfo vertexBufferCI = {};
+	vertexBufferCI.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
+	vertexBufferCI.size = sizeof(vertices[0]) * vertices.size();
+	vertexBufferCI.usage = VK_BUFFER_USAGE_VERTEX_BUFFER_BIT;
+	vertexBufferCI.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
+
+	if (vkCreateBuffer(logicalDevice, &vertexBufferCI, nullptr, &vertexBuffer) != VK_SUCCESS) {
+		fputs("Unable to create vertex buffer\n", stderr);
+		exit(EXIT_FAILURE);
+	}
+
+	return vertexBuffer;
+}
+
 std::vector<VkCommandBuffer> createCommandBuffers(VkCommandPool commandPool) {
 
 	std::vector<VkCommandBuffer> commandBuffers(swapchainFramebuffers.size());
@@ -823,6 +861,38 @@ std::vector<VkCommandBuffer> createCommandBuffers(VkCommandPool commandPool) {
 	return commandBuffers;
 }
 
+VkDescriptorSetLayout createDescriptorSetLayout() {
+
+	/* Uniform Buffer Object layout */
+	VkDescriptorSetLayoutBinding descriptorSetLayoutBinding = {};
+	descriptorSetLayoutBinding.binding            = 0;
+	descriptorSetLayoutBinding.descriptorType     = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
+	descriptorSetLayoutBinding.descriptorCount    = 1;
+	descriptorSetLayoutBinding.stageFlags         = VK_SHADER_STAGE_VERTEX_BIT;
+	descriptorSetLayoutBinding.pImmutableSamplers = nullptr;
+
+	VkDescriptorSetLayoutCreateInfo descriptorSetLayoutCI = {};
+	descriptorSetLayoutCI.sType        = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
+	descriptorSetLayoutCI.bindingCount = 1;
+	descriptorSetLayoutCI.pBindings    = &descriptorSetLayoutBinding;
+
+	if (vkCreateDescriptorSetLayout(logicalDevice, &descriptorSetLayoutCI, nullptr, &descriptorSetLayout) != VK_SUCCESS) {
+		fputs("Failed to create descriptor set layout\n", stderr);
+		exit(EXIT_FAILURE);
+	}
+
+	return descriptorSetLayout;
+}
+
+void createDescriptorPool() {
+	std::array<VkDescriptorPoolSize, 2> descriptorPoolSizes = {};
+
+}
+
+void createDescriptorSets() {
+
+}
+
 void recordRenderpasses() {
 
 	for (uint32_t i = 0; i < commandBuffers.size(); i++) {
@@ -837,11 +907,11 @@ void recordRenderpasses() {
 
 		std::array<VkClearValue, 2> clearColors = {};
 		clearColors[0].color = { 0.3f, 0.3f, 0.3f, 1.0f };
-		clearColors[1].depthStencil = { 1.0f, 0.0f };
+		clearColors[1].depthStencil = { 1.0f, 0 };
 
 		VkRenderPassBeginInfo renderpassBI = {};
 		renderpassBI.sType = VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO;
-		renderpassBI.renderpass = renderpass;
+		renderpassBI.renderPass = renderpass;
 		renderpassBI.framebuffer = swapchainFramebuffers[i];
 		renderpassBI.renderArea.offset = { 0, 0 };
 		renderpassBI.renderArea.extent = swapchainExtent;
@@ -874,7 +944,6 @@ void recordRenderpasses() {
 	}
 	
 }
-
 
 VkCommandBuffer beginCommandRecording(VkCommandPool commandPool) {
 
@@ -1258,9 +1327,9 @@ VkPipeline createGraphicsPipeline(const std::string vertexShaderPath, const std:
 	colorBlendStateCI.blendConstants[3] = 0.0f;
 
 	VkPipelineLayoutCreateInfo pipelineLayoutCI = {};
-	pipelineLayoutCI.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
-	pipelineLayoutCI.setLayoutCount = 0;
-	pipelineLayoutCI.pushConstantRangeCount = 0;
+	pipelineLayoutCI.sType          = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
+	pipelineLayoutCI.setLayoutCount = 1;
+	pipelineLayoutCI.pSetLayouts    = &descriptorSetLayout;
 
 	if (vkCreatePipelineLayout(logicalDevice, &pipelineLayoutCI, nullptr, &pipelineLayout) != VK_SUCCESS) {
 		fputs("Could not create pipeline layout\n", stderr);
@@ -1307,11 +1376,15 @@ void cleanup() {
 
 	vkDeviceWaitIdle(logicalDevice);
 
+	vkDestroyBuffer(logicalDevice, vertexBuffer, nullptr);
+
 	// vkDestroyShaderModule(logicalDevice, 
 
 	for (VkImageView imageView : swapchainImageViews) {
 		vkDestroyImageView(logicalDevice, imageView, nullptr);
 	}
+
+	vkDestroyDescriptorSetLayout(logicalDevice, descriptorSetLayout, nullptr);
 
 	vkDestroyCommandPool(logicalDevice, commandPool, nullptr);
 
@@ -1351,12 +1424,15 @@ int main(int argc, char *argv[]) {
 
 	renderpass = createRenderPass();
 
-	graphicsPipeline = createGraphicsPipeline("spirv/test.vert", "spirv/test.frag");
+	descriptorSetLayout = createDescriptorSetLayout();
 
-	commandPool = createCommandPool(graphicsFamilyIndex);
+	graphicsPipeline = createGraphicsPipeline("spirv/test.vert", "spirv/test.frag");
 
 	swapchainFramebuffers = createFramebuffers();
 
+	commandPool = createCommandPool(graphicsFamilyIndex);
+
+	vertexBuffer = createVertexBuffer();
 	depthBuffer = createDepthBuffer();
 
 	commandBuffers = createCommandBuffers(commandPool);
